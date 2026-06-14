@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest"
 
 import {
 	account,
+	agent,
 	agentKindEnum,
 	auditEventTypeEnum,
 	betterAuthSchema,
@@ -188,5 +189,41 @@ describe("database schema foundation", () => {
 		expect(
 			uniqueIndex?.config.columns.map((column) => ("name" in column ? column.name : undefined)),
 		).toEqual(["user_id", "fingerprint"])
+	})
+
+	it("defines the Agent metadata table", () => {
+		const columns = getTableColumns(agent)
+		const config = getTableConfig(agent)
+
+		expect(config.name).toBe("agent")
+		expect(config.schema).toBe("sandhost")
+		expect(columns.id.primary).toBe(true)
+		expect(columns.userId.notNull).toBe(true)
+		expect(columns.userId.getSQLType()).toBe(`varchar(${idColumnLength})`)
+		expect(columns.hostId.notNull).toBe(true)
+		expect(columns.hostId.getSQLType()).toBe(`varchar(${idColumnLength})`)
+		expect(columns.kind.notNull).toBe(true)
+		expect(columns.kind.getSQLType()).toBe("agent_kind")
+		expect(agentKindEnum.schema).toBe("sandhost")
+		expect(agentKindEnum.enumValues).toEqual(["codex"])
+		expect(columns.displayName.notNull).toBe(true)
+		expect(columns.displayName.getSQLType()).toBe("text")
+		expect(columns.createdAt.notNull).toBe(true)
+		expect(columns.createdAt.hasDefault).toBe(true)
+		expect(columns.lastSeenAt.notNull).toBe(true)
+		expect(columns.lastSeenAt.hasDefault).toBe(true)
+		expect(columns.lastSeenAt.getSQLType()).toBe("timestamp with time zone")
+	})
+
+	it("keeps agent registration unique per host, kind, and display name", () => {
+		const config = getTableConfig(agent)
+		const uniqueIndex = config.indexes.find(
+			(index) => index.config.name === "agent_host_kind_display_name_unique",
+		)
+
+		expect(uniqueIndex?.config.unique).toBe(true)
+		expect(
+			uniqueIndex?.config.columns.map((column) => ("name" in column ? column.name : undefined)),
+		).toEqual(["host_id", "kind", "display_name"])
 	})
 })

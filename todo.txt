@@ -34,7 +34,7 @@
 -[x] Add Better Auth user login | make sure to update schema with better auth tables
 -[x] Add Project table
 -[x] Add Host table
--[ ] Add Agent table
+-[x] Add Agent table
 -[ ] Add Grant table
 -[ ] Add Run table
 -[ ] Add Artifact table

@@ -194,3 +194,30 @@ export const host = sandhostSchema.table(
 
 export type Host = InferSelectModel<typeof host>
 export type NewHost = InferInsertModel<typeof host>
+
+export const agent = sandhostSchema.table(
+	"agent",
+	{
+		id: idColumn().primaryKey(),
+		userId: idColumn("user_id")
+			.notNull()
+			.references(() => user.id, { onDelete: "cascade" }),
+		hostId: idColumn("host_id")
+			.notNull()
+			.references(() => host.id, { onDelete: "cascade" }),
+		kind: agentKindEnum("kind").notNull(),
+		displayName: text("display_name").notNull(),
+		createdAt: createdAtColumn(),
+		lastSeenAt: createdAtColumn("last_seen_at"),
+	},
+	(table) => [
+		uniqueIndex("agent_host_kind_display_name_unique").on(
+			table.hostId,
+			table.kind,
+			table.displayName,
+		),
+	],
+)
+
+export type Agent = InferSelectModel<typeof agent>
+export type NewAgent = InferInsertModel<typeof agent>
