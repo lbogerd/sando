@@ -244,6 +244,10 @@ describe("PodmanRuntime", () => {
 					image: defaultNodeTsPodmanImage,
 					name: "sandhost-run-run_123",
 					network: "none",
+					resources: {
+						cpu: 2,
+						memoryMb: 4096,
+					},
 					workdir: "/workspace",
 				},
 			},
@@ -261,6 +265,10 @@ describe("PodmanRuntime", () => {
 					"sandhost-run-run_123",
 					"--network",
 					"none",
+					"--cpus",
+					"2",
+					"--memory",
+					"4096m",
 					"--workdir",
 					"/workspace",
 					"--env",
@@ -293,8 +301,8 @@ describe("PodmanRuntime", () => {
 			runtime: "podman",
 			network: "default",
 			resources: {
-				cpu: 2,
-				memoryMb: 4096,
+				cpu: 1.5,
+				memoryMb: 512,
 			},
 			timeoutSeconds: 600,
 		})
@@ -306,6 +314,10 @@ describe("PodmanRuntime", () => {
 				"create",
 				"--name",
 				"sandhost-run-run_123",
+				"--cpus",
+				"1.5",
+				"--memory",
+				"512m",
 				"--workdir",
 				"/workspace",
 				"--env",
@@ -320,6 +332,10 @@ describe("PodmanRuntime", () => {
 		if (result.ok) {
 			expect(result.value.metadata).toMatchObject({
 				network: "default",
+				resources: {
+					cpu: 1.5,
+					memoryMb: 512,
+				},
 			})
 		}
 	})
@@ -356,6 +372,10 @@ describe("PodmanRuntime", () => {
 					"sandhost-run-run_123",
 					"--network",
 					"none",
+					"--cpus",
+					"2",
+					"--memory",
+					"4096m",
 					"--workdir",
 					"/workspace",
 					"--env",

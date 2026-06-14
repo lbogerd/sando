@@ -195,6 +195,7 @@ export class PodmanRuntime implements SandboxRuntime {
 			image: image.value.image,
 			name,
 			network: input.network,
+			resources: input.resources,
 			workdir,
 		})
 		const create = await this.runner(this.command, createArgs)
@@ -237,6 +238,7 @@ export class PodmanRuntime implements SandboxRuntime {
 				image: image.value.image,
 				name,
 				network: input.network,
+				resources: input.resources,
 				workdir,
 			},
 		})
@@ -488,6 +490,7 @@ type PodmanCreateArgsInput = {
 	readonly image: string
 	readonly name: string
 	readonly network: NetworkMode
+	readonly resources: ResourceLimits
 	readonly workdir: string
 }
 
@@ -497,6 +500,7 @@ function podmanCreateArgs(input: PodmanCreateArgsInput): readonly string[] {
 		"--name",
 		input.name,
 		...podmanNetworkArgs(input.network),
+		...podmanResourceArgs(input.resources),
 		"--workdir",
 		input.workdir,
 		...podmanEnvArgs({
@@ -512,6 +516,10 @@ function podmanCreateArgs(input: PodmanCreateArgsInput): readonly string[] {
 
 function podmanNetworkArgs(network: NetworkMode): readonly string[] {
 	return network === "none" ? ["--network", "none"] : []
+}
+
+function podmanResourceArgs(resources: ResourceLimits): readonly string[] {
+	return ["--cpus", String(resources.cpu), "--memory", `${resources.memoryMb}m`]
 }
 
 type PodmanExecArgsInput = {

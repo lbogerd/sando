@@ -18,7 +18,7 @@
 -[x] Implement Podman image build/pull path
 -[x] Implement Podman create/run/destroy
 -[x] Implement network modes: none/default
--[ ] Implement CPU/memory flags
+-[x] Implement CPU/memory flags
 -[ ] Implement timeout handling
 -[ ] Capture stdout/stderr/logs
 -[ ] Generate baseline git commit inside sandbox
