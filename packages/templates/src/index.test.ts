@@ -132,6 +132,55 @@ describe("node-ts sandbox runner script", () => {
 		})
 	})
 
+	it("writes diff and changed-file artifacts after argv commands run", async () => {
+		const { artifacts, workspace } = await tempSandboxDirs()
+		await writeFile(join(workspace, "deleted.txt"), "remove me\n")
+		await writeFile(join(workspace, "source.txt"), "before\n")
+
+		await execFileAsync(
+			nodeTsRunnerScriptPath,
+			["bash", "-lc", 'printf "after\\n" >> source.txt; printf "new\\n" > new.txt; rm deleted.txt'],
+			{
+				env: sandboxEnv(workspace, artifacts),
+			},
+		)
+
+		const diff = await readFile(join(artifacts, "diff.patch"), "utf8")
+		expect(diff).toContain("diff --git a/deleted.txt b/deleted.txt")
+		expect(diff).toContain("deleted file mode")
+		expect(diff).toContain("diff --git a/new.txt b/new.txt")
+		expect(diff).toContain("new file mode")
+		expect(diff).toContain("diff --git a/source.txt b/source.txt")
+		expect(diff).toContain("+after")
+
+		const changedFiles = await readFile(join(artifacts, "changed-files.txt"), "utf8")
+		expect(changedFiles).toContain("D  deleted.txt\n")
+		expect(changedFiles).toContain(" A new.txt\n")
+		expect(changedFiles).toContain(" M source.txt\n")
+	})
+
+	it("writes diff artifacts when argv commands fail", async () => {
+		const { artifacts, workspace } = await tempSandboxDirs()
+		await writeFile(join(workspace, "source.txt"), "before\n")
+
+		await expect(
+			execFileAsync(
+				nodeTsRunnerScriptPath,
+				["bash", "-lc", 'printf "failed\\n" >> source.txt; exit 9'],
+				{
+					env: sandboxEnv(workspace, artifacts),
+				},
+			),
+		).rejects.toMatchObject({
+			code: 9,
+		})
+
+		await expect(readFile(join(artifacts, "diff.patch"), "utf8")).resolves.toContain("+failed")
+		await expect(readFile(join(artifacts, "changed-files.txt"), "utf8")).resolves.toContain(
+			" M source.txt\n",
+		)
+	})
+
 	it("runs SANDHOST_COMMAND when no argv command is provided", async () => {
 		const { artifacts, workspace } = await tempSandboxDirs()
 
@@ -181,6 +230,8 @@ describe("node-ts sandbox runner script", () => {
 		await expect(git(workspace, ["log", "-1", "--format=%s"])).resolves.toMatchObject({
 			stdout: "sandhost baseline\n",
 		})
+		await expect(readFile(join(artifacts, "diff.patch"), "utf8")).resolves.toBe("")
+		await expect(readFile(join(artifacts, "changed-files.txt"), "utf8")).resolves.toBe("")
 	})
 
 	it("fails with usage when no command is provided", async () => {

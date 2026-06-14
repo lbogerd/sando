@@ -6,6 +6,8 @@ artifacts="${SANDHOST_ARTIFACTS:-/artifacts}"
 stdout_file="$artifacts/stdout.txt"
 stderr_file="$artifacts/stderr.txt"
 logs_file="$artifacts/logs.txt"
+diff_file="$artifacts/diff.patch"
+changed_files_file="$artifacts/changed-files.txt"
 
 usage() {
 	printf 'usage: %s <command> [args...]\n' "$0" >&2
@@ -43,15 +45,33 @@ run_captured() {
 	return "$status"
 }
 
-if [[ "$#" -gt 0 ]]; then
+capture_workspace_changes() {
+	git add -N .
+	git diff --binary HEAD > "$diff_file"
+	git status --porcelain=v1 > "$changed_files_file"
+}
+
+run_project_command() {
 	create_baseline_commit
-	run_captured "$@"
+
+	local status
+	if run_captured "$@"; then
+		status=0
+	else
+		status="$?"
+	fi
+
+	capture_workspace_changes
+	return "$status"
+}
+
+if [[ "$#" -gt 0 ]]; then
+	run_project_command "$@"
 	exit "$?"
 fi
 
 if [[ -n "${SANDHOST_COMMAND:-}" ]]; then
-	create_baseline_commit
-	run_captured bash -lc "$SANDHOST_COMMAND"
+	run_project_command bash -lc "$SANDHOST_COMMAND"
 	exit "$?"
 fi
 

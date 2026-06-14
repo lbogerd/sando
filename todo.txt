@@ -22,7 +22,7 @@
 -[x] Implement timeout handling
 -[x] Capture stdout/stderr/logs
 -[x] Generate baseline git commit inside sandbox
--[ ] Generate diff.patch and changed-files.txt
+-[x] Generate diff.patch and changed-files.txt
 -[ ] Copy artifacts to .sandhost/runs/<runId>
 -[ ] Write result.json
 -[ ] Add cleanup-on-error/finally handling
