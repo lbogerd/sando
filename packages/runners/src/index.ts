@@ -29,6 +29,21 @@ export const gitArchiveFileSelectionArgs = [
 	"-o",
 	"--exclude-standard",
 ] as const
+export const hardcodedSensitiveFileExclusions = {
+	basenames: [
+		".env",
+		".npmrc",
+		".pypirc",
+		".netrc",
+		"id_dsa",
+		"id_ecdsa",
+		"id_ed25519",
+		"id_rsa",
+	] as const,
+	envPrefix: ".env.",
+	extensions: [".key", ".pem", ".p12", ".pfx"] as const,
+	paths: [".aws/credentials", ".docker/config.json", ".kube/config"] as const,
+} as const
 
 const execFileAsync = promisify(execFile)
 
@@ -353,7 +368,7 @@ export async function selectArchiveFiles(
 
 		return ok({
 			projectRoot: projectRoot.value,
-			files: parseGitNullDelimitedPaths(stdout),
+			files: filterSensitiveArchiveFiles(parseGitNullDelimitedPaths(stdout)),
 		})
 	} catch (error) {
 		if (!isExecFileError(error)) {
@@ -381,6 +396,45 @@ function parseGitNullDelimitedPaths(output: string): readonly string[] {
 		.split("\0")
 		.filter((path) => path.length > 0)
 		.sort()
+}
+
+export function filterSensitiveArchiveFiles(files: readonly string[]): readonly string[] {
+	return files.filter((path) => !isSensitiveArchiveFilePath(path))
+}
+
+export function isSensitiveArchiveFilePath(path: string): boolean {
+	const normalizedPath = normalizeArchivePath(path)
+	const segments = normalizedPath.split("/")
+	const basename = segments.at(-1) ?? normalizedPath
+
+	if (
+		segments.some(
+			(segment) =>
+				stringListIncludes(hardcodedSensitiveFileExclusions.basenames, segment) ||
+				segment.startsWith(hardcodedSensitiveFileExclusions.envPrefix),
+		)
+	) {
+		return true
+	}
+
+	if (
+		hardcodedSensitiveFileExclusions.extensions.some((extension) => basename.endsWith(extension))
+	) {
+		return true
+	}
+
+	return hardcodedSensitiveFileExclusions.paths.some(
+		(sensitivePath) =>
+			normalizedPath === sensitivePath || normalizedPath.endsWith(`/${sensitivePath}`),
+	)
+}
+
+function stringListIncludes(values: readonly string[], value: string): boolean {
+	return values.includes(value)
+}
+
+function normalizeArchivePath(path: string): string {
+	return path.replaceAll("\\", "/").replace(/^\/+/, "")
 }
 
 function policyLayers(input: CompileEffectivePolicyInput): readonly PolicyConstraints[] {

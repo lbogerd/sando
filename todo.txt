@@ -12,7 +12,7 @@
 -[x] Implement .sandhost/policy.json loader
 -[x] Implement effective policy compiler
 -[x] Implement archive file selection using git ls-files -co --exclude-standard
--[ ] Add hardcoded sensitive-file exclusions
+-[x] Add hardcoded sensitive-file exclusions
 -[ ] Create node-ts Containerfile
 -[ ] Add sandbox runner script inside image
 -[ ] Implement Podman image build/pull path

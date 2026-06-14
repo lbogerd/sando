@@ -10,7 +10,9 @@ import { defaultSandoPolicy } from "@sando/shared"
 
 import {
 	compileEffectivePolicy,
+	filterSensitiveArchiveFiles,
 	findProjectRoot,
+	isSensitiveArchiveFilePath,
 	loadProjectPolicy,
 	projectPolicyFilePath,
 	selectArchiveFiles,
@@ -404,6 +406,31 @@ describe("selectArchiveFiles", () => {
 		}
 	})
 
+	it("filters hardcoded sensitive files after git selection", async () => {
+		const root = await tempProject()
+
+		await initGitProject(root)
+		await mkdir(join(root, "config"), { recursive: true })
+		await mkdir(join(root, ".ssh"), { recursive: true })
+		await mkdir(join(root, ".aws"), { recursive: true })
+		await mkdir(join(root, "certs"), { recursive: true })
+		await writeFile(join(root, "README.md"), "# safe\n")
+		await writeFile(join(root, ".env"), "TOKEN=secret\n")
+		await writeFile(join(root, "config", ".env.local"), "TOKEN=secret\n")
+		await writeFile(join(root, ".npmrc"), "//registry.npmjs.org/:_authToken=secret\n")
+		await writeFile(join(root, ".ssh", "id_ed25519"), "secret\n")
+		await writeFile(join(root, ".aws", "credentials"), "secret\n")
+		await writeFile(join(root, "certs", "client.pem"), "secret\n")
+		await runGit(root, ["add", "README.md", ".env", ".npmrc", ".ssh/id_ed25519"])
+
+		const result = await selectArchiveFiles({ projectRoot: root })
+
+		expect(result.ok).toBe(true)
+		if (result.ok) {
+			expect(result.value.files).toEqual(["README.md"])
+		}
+	})
+
 	it("detects the project root from a nested start path", async () => {
 		const root = await tempProject()
 		const nested = join(root, "packages", "app")
@@ -437,6 +464,30 @@ describe("selectArchiveFiles", () => {
 				stderr: expect.stringContaining("not a git repository"),
 			})
 		}
+	})
+})
+
+describe("hardcoded sensitive file exclusions", () => {
+	it("matches common secret-bearing archive paths", () => {
+		expect(isSensitiveArchiveFilePath(".env")).toBe(true)
+		expect(isSensitiveArchiveFilePath("apps/api/.env.production")).toBe(true)
+		expect(isSensitiveArchiveFilePath(".npmrc")).toBe(true)
+		expect(isSensitiveArchiveFilePath(".ssh/id_rsa")).toBe(true)
+		expect(isSensitiveArchiveFilePath("certs/client.key")).toBe(true)
+		expect(isSensitiveArchiveFilePath("certs/client.pem")).toBe(true)
+		expect(isSensitiveArchiveFilePath(".aws/credentials")).toBe(true)
+		expect(isSensitiveArchiveFilePath("users/me/.kube/config")).toBe(true)
+	})
+
+	it("leaves ordinary source and docs files selected", () => {
+		expect(
+			filterSensitiveArchiveFiles([
+				"README.md",
+				"src/index.ts",
+				"docs/env-notes.md",
+				"packages/api/src/key-value.ts",
+			]),
+		).toEqual(["README.md", "src/index.ts", "docs/env-notes.md", "packages/api/src/key-value.ts"])
 	})
 })
 
