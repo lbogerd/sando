@@ -174,3 +174,23 @@ export const project = sandhostSchema.table(
 
 export type Project = InferSelectModel<typeof project>
 export type NewProject = InferInsertModel<typeof project>
+
+export const host = sandhostSchema.table(
+	"host",
+	{
+		id: idColumn().primaryKey(),
+		userId: idColumn("user_id")
+			.notNull()
+			.references(() => user.id, { onDelete: "cascade" }),
+		name: text("name").notNull(),
+		platform: hostPlatformEnum("platform").notNull(),
+		runtime: sandboxRuntimeEnum("runtime").notNull(),
+		fingerprint: text("fingerprint").notNull(),
+		createdAt: createdAtColumn(),
+		lastSeenAt: createdAtColumn("last_seen_at"),
+	},
+	(table) => [uniqueIndex("host_user_fingerprint_unique").on(table.userId, table.fingerprint)],
+)
+
+export type Host = InferSelectModel<typeof host>
+export type NewHost = InferInsertModel<typeof host>

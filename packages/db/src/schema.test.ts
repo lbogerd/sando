@@ -11,6 +11,7 @@ import {
 	databaseSchemaName,
 	grantScopeEnum,
 	grantStatusEnum,
+	host,
 	hostPlatformEnum,
 	idColumn,
 	idColumnLength,
@@ -147,5 +148,45 @@ describe("database schema foundation", () => {
 		expect(
 			uniqueIndex?.config.columns.map((column) => ("name" in column ? column.name : undefined)),
 		).toEqual(["user_id", "local_fingerprint"])
+	})
+
+	it("defines the Host metadata table", () => {
+		const columns = getTableColumns(host)
+		const config = getTableConfig(host)
+
+		expect(config.name).toBe("host")
+		expect(config.schema).toBe("sandhost")
+		expect(columns.id.primary).toBe(true)
+		expect(columns.userId.notNull).toBe(true)
+		expect(columns.userId.getSQLType()).toBe(`varchar(${idColumnLength})`)
+		expect(columns.name.notNull).toBe(true)
+		expect(columns.name.getSQLType()).toBe("text")
+		expect(columns.platform.notNull).toBe(true)
+		expect(columns.platform.getSQLType()).toBe("host_platform")
+		expect(hostPlatformEnum.schema).toBe("sandhost")
+		expect(hostPlatformEnum.enumValues).toEqual(["linux-wsl"])
+		expect(columns.runtime.notNull).toBe(true)
+		expect(columns.runtime.getSQLType()).toBe("sandbox_runtime")
+		expect(sandboxRuntimeEnum.schema).toBe("sandhost")
+		expect(sandboxRuntimeEnum.enumValues).toEqual(["podman", "docker", "kubernetes"])
+		expect(columns.fingerprint.notNull).toBe(true)
+		expect(columns.fingerprint.getSQLType()).toBe("text")
+		expect(columns.createdAt.notNull).toBe(true)
+		expect(columns.createdAt.hasDefault).toBe(true)
+		expect(columns.lastSeenAt.notNull).toBe(true)
+		expect(columns.lastSeenAt.hasDefault).toBe(true)
+		expect(columns.lastSeenAt.getSQLType()).toBe("timestamp with time zone")
+	})
+
+	it("keeps host registration unique per user and host fingerprint", () => {
+		const config = getTableConfig(host)
+		const uniqueIndex = config.indexes.find(
+			(index) => index.config.name === "host_user_fingerprint_unique",
+		)
+
+		expect(uniqueIndex?.config.unique).toBe(true)
+		expect(
+			uniqueIndex?.config.columns.map((column) => ("name" in column ? column.name : undefined)),
+		).toEqual(["user_id", "fingerprint"])
 	})
 })
