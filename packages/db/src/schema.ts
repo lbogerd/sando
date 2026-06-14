@@ -1,4 +1,4 @@
-import { jsonb, pgSchema, timestamp, varchar } from "drizzle-orm/pg-core"
+import { boolean, jsonb, pgSchema, text, timestamp, varchar } from "drizzle-orm/pg-core"
 
 import {
 	networkModes,
@@ -72,3 +72,76 @@ export function createdAtColumn(name = "created_at") {
 export function metadataJsonColumn(name = "metadata") {
 	return jsonb(name).$type<MetadataJson>().notNull()
 }
+
+function authTimestampColumn(name: string) {
+	return timestamp(name, { withTimezone: true })
+}
+
+function requiredAuthTimestampColumn(name: string) {
+	return authTimestampColumn(name).notNull()
+}
+
+function authCreatedAtColumn() {
+	return requiredAuthTimestampColumn("created_at").defaultNow()
+}
+
+function authUpdatedAtColumn() {
+	return requiredAuthTimestampColumn("updated_at").defaultNow()
+}
+
+export const user = sandhostSchema.table("user", {
+	id: idColumn().primaryKey(),
+	name: text("name").notNull(),
+	email: text("email").notNull().unique(),
+	emailVerified: boolean("email_verified").notNull().default(false),
+	image: text("image"),
+	createdAt: authCreatedAtColumn(),
+	updatedAt: authUpdatedAtColumn(),
+})
+
+export const session = sandhostSchema.table("session", {
+	id: idColumn().primaryKey(),
+	expiresAt: requiredAuthTimestampColumn("expires_at"),
+	token: text("token").notNull().unique(),
+	createdAt: authCreatedAtColumn(),
+	updatedAt: authUpdatedAtColumn(),
+	ipAddress: text("ip_address"),
+	userAgent: text("user_agent"),
+	userId: idColumn("user_id")
+		.notNull()
+		.references(() => user.id, { onDelete: "cascade" }),
+})
+
+export const account = sandhostSchema.table("account", {
+	id: idColumn().primaryKey(),
+	accountId: text("account_id").notNull(),
+	providerId: text("provider_id").notNull(),
+	userId: idColumn("user_id")
+		.notNull()
+		.references(() => user.id, { onDelete: "cascade" }),
+	accessToken: text("access_token"),
+	refreshToken: text("refresh_token"),
+	idToken: text("id_token"),
+	accessTokenExpiresAt: authTimestampColumn("access_token_expires_at"),
+	refreshTokenExpiresAt: authTimestampColumn("refresh_token_expires_at"),
+	scope: text("scope"),
+	password: text("password"),
+	createdAt: authCreatedAtColumn(),
+	updatedAt: authUpdatedAtColumn(),
+})
+
+export const verification = sandhostSchema.table("verification", {
+	id: idColumn().primaryKey(),
+	identifier: text("identifier").notNull(),
+	value: text("value").notNull(),
+	expiresAt: requiredAuthTimestampColumn("expires_at"),
+	createdAt: authCreatedAtColumn(),
+	updatedAt: authUpdatedAtColumn(),
+})
+
+export const betterAuthSchema = {
+	user,
+	session,
+	account,
+	verification,
+} as const

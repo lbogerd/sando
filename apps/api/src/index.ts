@@ -2,12 +2,14 @@ import { serve, type ServerType } from "@hono/node-server"
 import { Hono } from "hono"
 import { pathToFileURL } from "node:url"
 
+import { authBasePath, type SandhostAuth } from "@sando/auth"
 import { runProjectCommandInputMetadata, sandoPolicyMetadata } from "@sando/shared"
 
 export const apiServiceName = "sandhost-api"
 export const apiVersion = "v1"
 
 export type HostedAppOptions = {
+	readonly auth?: Pick<SandhostAuth, "handler">
 	readonly now?: () => Date
 }
 
@@ -19,6 +21,11 @@ export type HostedServerOptions = HostedAppOptions & {
 export function createHostedApp(options: HostedAppOptions = {}): Hono {
 	const now = options.now ?? (() => new Date())
 	const app = new Hono()
+	const auth = options.auth
+
+	if (auth !== undefined) {
+		app.on(["GET", "POST"], `${authBasePath}/*`, (context) => auth.handler(context.req.raw))
+	}
 
 	app.get("/", (context) =>
 		context.json({
@@ -91,7 +98,10 @@ export const app = createHostedApp()
 export function serveHostedApp(options: HostedServerOptions = {}): ServerType {
 	const port = options.port ?? Number.parseInt(process.env.PORT ?? "3000", 10)
 	const hostname = options.hostname ?? process.env.HOST ?? "0.0.0.0"
-	const hostedApp = createHostedApp(options.now === undefined ? {} : { now: options.now })
+	const hostedApp = createHostedApp({
+		...(options.auth === undefined ? {} : { auth: options.auth }),
+		...(options.now === undefined ? {} : { now: options.now }),
+	})
 
 	return serve(
 		{

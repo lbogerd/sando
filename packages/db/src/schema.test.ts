@@ -2,8 +2,10 @@ import { getTableColumns } from "drizzle-orm"
 import { describe, expect, it } from "vitest"
 
 import {
+	account,
 	agentKindEnum,
 	auditEventTypeEnum,
+	betterAuthSchema,
 	createdAtColumn,
 	databaseSchemaName,
 	grantScopeEnum,
@@ -18,6 +20,9 @@ import {
 	runStatusEnum,
 	sandboxRuntimeEnum,
 	sandhostSchema,
+	session,
+	user,
+	verification,
 } from "./index.js"
 
 describe("database schema foundation", () => {
@@ -80,5 +85,34 @@ describe("database schema foundation", () => {
 		expect(columns.finishedAt.notNull).toBe(true)
 		expect(columns.metadata.getSQLType()).toBe("jsonb")
 		expect(columns.metadata.notNull).toBe(true)
+	})
+
+	it("defines the Better Auth core table map", () => {
+		expect(betterAuthSchema).toEqual({
+			user,
+			session,
+			account,
+			verification,
+		})
+	})
+
+	it("maps Better Auth core fields to sandhost schema tables", () => {
+		const userColumns = getTableColumns(user)
+		const sessionColumns = getTableColumns(session)
+		const accountColumns = getTableColumns(account)
+		const verificationColumns = getTableColumns(verification)
+
+		expect(userColumns.id.primary).toBe(true)
+		expect(userColumns.email.notNull).toBe(true)
+		expect(userColumns.emailVerified.getSQLType()).toBe("boolean")
+		expect(userColumns.createdAt.getSQLType()).toBe("timestamp with time zone")
+		expect(sessionColumns.token.notNull).toBe(true)
+		expect(sessionColumns.expiresAt.getSQLType()).toBe("timestamp with time zone")
+		expect(sessionColumns.userId.notNull).toBe(true)
+		expect(accountColumns.providerId.notNull).toBe(true)
+		expect(accountColumns.password.getSQLType()).toBe("text")
+		expect(verificationColumns.identifier.notNull).toBe(true)
+		expect(verificationColumns.value.notNull).toBe(true)
+		expect(verificationColumns.expiresAt.notNull).toBe(true)
 	})
 })

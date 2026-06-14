@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest"
 
+import { authBasePath } from "@sando/auth"
+
 import { apiServiceName, apiVersion, createHostedApp } from "./index.js"
 
 const fixedNow = new Date("2026-06-14T17:30:00.000Z")
@@ -56,6 +58,28 @@ describe("hosted API app", () => {
 					},
 				},
 			},
+		})
+	})
+
+	it("mounts the Better Auth handler for login routes", async () => {
+		const app = createHostedApp({
+			auth: {
+				handler: async (request) =>
+					Response.json({
+						method: request.method,
+						path: new URL(request.url).pathname,
+					}),
+			},
+		})
+
+		const response = await app.request(`${authBasePath}/sign-in/email`, {
+			method: "POST",
+		})
+
+		expect(response.status).toBe(200)
+		expect(await response.json()).toEqual({
+			method: "POST",
+			path: `${authBasePath}/sign-in/email`,
 		})
 	})
 

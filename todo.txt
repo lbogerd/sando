@@ -31,7 +31,7 @@
 [ ] Phase 2 - Hosted control plane metadata
 -[x] Create hosted app | use Hono
 -[x] Add database schema
--[ ] Add Better Auth user login | make sure to update schema with better auth tables
+-[x] Add Better Auth user login | make sure to update schema with better auth tables
 -[ ] Add Project table
 -[ ] Add Host table
 -[ ] Add Agent table

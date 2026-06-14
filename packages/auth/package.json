@@ -8,5 +8,10 @@
 	},
 	"scripts": {
 		"typecheck": "tsc -p tsconfig.json --noEmit"
+	},
+	"dependencies": {
+		"@better-auth/drizzle-adapter": "^1.6.18",
+		"@sando/db": "workspace:*",
+		"better-auth": "^1.6.18"
 	}
 }
