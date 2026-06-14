@@ -13,9 +13,11 @@ import {
 	type PodmanCommandResult,
 	type PodmanCommandRunner,
 	type RuntimeResultJson,
+	type SandboxRuntime,
 	type SandboxHandle,
+	withSandboxCleanup,
 } from "./index.js"
-import { asId, err, sandoError, type Result } from "@sando/shared"
+import { asId, err, ok, sandoError, type Result } from "@sando/shared"
 
 const tempRoots: string[] = []
 
@@ -237,6 +239,55 @@ describe("defaultPodmanCommandRunner", () => {
 	})
 })
 
+describe("withSandboxCleanup", () => {
+	it("destroys the sandbox after successful operations", async () => {
+		const runtime = fakeCleanupRuntime(ok(undefined))
+		const handle = podmanHandle()
+		const result = await withSandboxCleanup(runtime.runtime, handle, async () => ok("done"))
+
+		expect(result).toEqual({ ok: true, value: "done" })
+		expect(runtime.destroyed).toEqual([handle])
+	})
+
+	it("destroys the sandbox and preserves operation errors", async () => {
+		const runtime = fakeCleanupRuntime(ok(undefined))
+		const handle = podmanHandle()
+		const operationError = sandoError({
+			code: "SANDBOX_FAILED",
+			message: "Command failed.",
+		})
+		const result = await withSandboxCleanup(runtime.runtime, handle, async () =>
+			err(operationError),
+		)
+
+		expect(result).toEqual({ ok: false, error: operationError })
+		expect(runtime.destroyed).toEqual([handle])
+	})
+
+	it("returns cleanup failures after successful operations", async () => {
+		const cleanupError = sandoError({
+			code: "SANDBOX_FAILED",
+			message: "Cleanup failed.",
+		})
+		const runtime = fakeCleanupRuntime(err(cleanupError))
+		const result = await withSandboxCleanup(runtime.runtime, podmanHandle(), async () => ok("done"))
+
+		expect(result).toEqual({ ok: false, error: cleanupError })
+	})
+
+	it("destroys the sandbox when operations throw without hiding the thrown error", async () => {
+		const runtime = fakeCleanupRuntime(ok(undefined))
+		const handle = podmanHandle()
+
+		await expect(
+			withSandboxCleanup(runtime.runtime, handle, async () => {
+				throw new Error("boom")
+			}),
+		).rejects.toThrow("boom")
+		expect(runtime.destroyed).toEqual([handle])
+	})
+})
+
 describe("PodmanRuntime", () => {
 	it("creates and starts a Podman sandbox", async () => {
 		const runner = fakePodmanRunner([
@@ -424,6 +475,41 @@ describe("PodmanRuntime", () => {
 				stderr: "bad create",
 			})
 		}
+	})
+
+	it("destroys a created Podman sandbox when start fails", async () => {
+		const runner = fakePodmanRunner([
+			{ exitCode: 0, stdout: "container-id\n", stderr: "" },
+			{ exitCode: 125, stdout: "", stderr: "bad start" },
+			{ exitCode: 0, stdout: "", stderr: "" },
+		])
+		const runtime = new PodmanRuntime({ commandRunner: runner.run })
+		const result = await runtime.createSandbox({
+			runId: asId("run", "run_123"),
+			template: "node-ts",
+			runtime: "podman",
+			network: "none",
+			resources: {
+				cpu: 2,
+				memoryMb: 4096,
+			},
+			timeoutSeconds: 600,
+		})
+
+		expect(result.ok).toBe(false)
+		if (!result.ok) {
+			expect(result.error.code).toBe("SANDBOX_FAILED")
+			expect(result.error.details).toMatchObject({
+				command: "podman",
+				args: ["start", "sandhost-run-run_123"],
+				exitCode: 125,
+				stderr: "bad start",
+			})
+		}
+		expect(runner.calls.at(-1)).toEqual({
+			command: "podman",
+			args: ["rm", "--force", "sandhost-run-run_123"],
+		})
 	})
 
 	it("runs a command in an existing Podman sandbox", async () => {
@@ -730,6 +816,36 @@ function fakePodmanRunner(results: Array<PodmanCommandResult | Result<PodmanComm
 				ok: true,
 				value: result,
 			}
+		},
+	}
+}
+
+function fakeCleanupRuntime(destroyResult: Result<void>): {
+	destroyed: SandboxHandle[]
+	runtime: SandboxRuntime
+} {
+	const destroyed: SandboxHandle[] = []
+
+	return {
+		destroyed,
+		runtime: {
+			kind: "podman",
+			createSandbox: async () => {
+				throw new Error("createSandbox is not used by this fake runtime.")
+			},
+			uploadWorkspace: async () => {
+				throw new Error("uploadWorkspace is not used by this fake runtime.")
+			},
+			runCommand: async () => {
+				throw new Error("runCommand is not used by this fake runtime.")
+			},
+			collectArtifacts: async () => {
+				throw new Error("collectArtifacts is not used by this fake runtime.")
+			},
+			destroySandbox: async (handle) => {
+				destroyed.push(handle)
+				return destroyResult
+			},
 		},
 	}
 }

@@ -115,6 +115,52 @@ export interface SandboxRuntime {
 	destroySandbox(handle: SandboxHandle): Promise<Result<void>>
 }
 
+export async function withSandboxCleanup<Value>(
+	runtime: SandboxRuntime,
+	handle: SandboxHandle,
+	operation: (handle: SandboxHandle) => Promise<Result<Value>>,
+): Promise<Result<Value>> {
+	let operationResult: Result<Value> | undefined
+	let operationError: unknown
+
+	try {
+		operationResult = await operation(handle)
+	} catch (error) {
+		operationError = error
+	}
+
+	let cleanupResult: Result<void> | undefined
+	let cleanupError: unknown
+
+	try {
+		cleanupResult = await runtime.destroySandbox(handle)
+	} catch (error) {
+		cleanupError = error
+	}
+
+	if (operationError !== undefined) {
+		throw operationError
+	}
+
+	if (operationResult !== undefined && !operationResult.ok) {
+		return operationResult
+	}
+
+	if (cleanupError !== undefined) {
+		throw cleanupError
+	}
+
+	if (cleanupResult !== undefined && !cleanupResult.ok) {
+		return err(cleanupResult.error)
+	}
+
+	if (operationResult === undefined) {
+		throw new Error("Sandbox operation did not produce a result.")
+	}
+
+	return operationResult
+}
+
 export type PodmanCommandOptions = {
 	readonly cwd?: string
 	readonly timeoutMs?: number
@@ -246,10 +292,12 @@ export class PodmanRuntime implements SandboxRuntime {
 		const start = await this.runner(this.command, startArgs)
 
 		if (!start.ok) {
+			await cleanupPodmanContainer(this.command, this.runner, name)
 			return start
 		}
 
 		if (start.value.exitCode !== 0) {
+			await cleanupPodmanContainer(this.command, this.runner, name)
 			return podmanImageFailure(
 				"Could not start Podman sandbox.",
 				this.command,
@@ -562,6 +610,18 @@ async function pullPodmanImage(
 		stdout: result.value.stdout,
 		stderr: result.value.stderr,
 	})
+}
+
+async function cleanupPodmanContainer(
+	command: string,
+	runner: PodmanCommandRunner,
+	container: string,
+): Promise<void> {
+	try {
+		await runner(command, ["rm", "--force", container])
+	} catch {
+		// Preserve the original lifecycle failure; later orchestration can report cleanup health.
+	}
 }
 
 function podmanBuildArgs(image: string, source: PodmanBuildImageSource): readonly string[] {

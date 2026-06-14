@@ -25,6 +25,6 @@
 -[x] Generate diff.patch and changed-files.txt
 -[x] Copy artifacts to .sandhost/runs/<runId>
 -[x] Write result.json
--[ ] Add cleanup-on-error/finally handling
+-[x] Add cleanup-on-error/finally handling
 -[ ] Add integration fixture repo
 -[ ] Add WSL/Podman diagnostics spike
