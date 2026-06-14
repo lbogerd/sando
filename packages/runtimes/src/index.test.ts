@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 
 import {
 	defaultNodeTsPodmanImage,
+	defaultPodmanCommandRunner,
 	ensurePodmanImage,
 	PodmanRuntime,
 	type PodmanCommandOptions,
@@ -205,6 +206,26 @@ describe("ensurePodmanImage", () => {
 	})
 })
 
+describe("defaultPodmanCommandRunner", () => {
+	it("returns timed-out command results without treating Podman as unavailable", async () => {
+		const result = await defaultPodmanCommandRunner(
+			process.execPath,
+			["-e", "setTimeout(() => {}, 1000)"],
+			{ timeoutMs: 20 },
+		)
+
+		expect(result.ok).toBe(true)
+		if (result.ok) {
+			expect(result.value).toMatchObject({
+				exitCode: null,
+				stdout: "",
+				stderr: "",
+				timedOut: true,
+			})
+		}
+	})
+})
+
 describe("PodmanRuntime", () => {
 	it("creates and starts a Podman sandbox", async () => {
 		const runner = fakePodmanRunner([
@@ -248,6 +269,7 @@ describe("PodmanRuntime", () => {
 						cpu: 2,
 						memoryMb: 4096,
 					},
+					timeoutSeconds: 600,
 					workdir: "/workspace",
 				},
 			},
@@ -336,6 +358,7 @@ describe("PodmanRuntime", () => {
 					cpu: 1.5,
 					memoryMb: 512,
 				},
+				timeoutSeconds: 600,
 			})
 		}
 	})
@@ -435,6 +458,66 @@ describe("PodmanRuntime", () => {
 		])
 	})
 
+	it("uses the sandbox timeout when running commands", async () => {
+		const runner = fakePodmanRunner([{ exitCode: 0, stdout: "ok", stderr: "" }])
+		const runtime = new PodmanRuntime({ commandRunner: runner.run })
+		const result = await runtime.runCommand(podmanHandle({ timeoutSeconds: 600 }), {
+			command: "pnpm test",
+		})
+
+		expect(result.ok).toBe(true)
+		expect(runner.calls).toEqual([
+			{
+				command: "podman",
+				args: [
+					"exec",
+					"sandhost-run-run_123",
+					"/sandhost/runner/run.sh",
+					"bash",
+					"-lc",
+					"pnpm test",
+				],
+				options: { timeoutMs: 600000 },
+			},
+		])
+	})
+
+	it("uses a command timeout override and reports timed-out commands", async () => {
+		const runner = fakePodmanRunner([
+			{ exitCode: null, stdout: "partial", stderr: "", timedOut: true, signal: "SIGTERM" },
+		])
+		const runtime = new PodmanRuntime({ commandRunner: runner.run })
+		const result = await runtime.runCommand(podmanHandle({ timeoutSeconds: 600 }), {
+			command: "sleep 999",
+			timeoutSeconds: 5,
+		})
+
+		expect(result.ok).toBe(true)
+		if (result.ok) {
+			expect(result.value).toMatchObject({
+				status: "timed_out",
+				exitCode: null,
+				stdout: "partial",
+				stderr: "",
+				logs: "partial",
+			})
+		}
+		expect(runner.calls).toEqual([
+			{
+				command: "podman",
+				args: [
+					"exec",
+					"sandhost-run-run_123",
+					"/sandhost/runner/run.sh",
+					"bash",
+					"-lc",
+					"sleep 999",
+				],
+				options: { timeoutMs: 5000 },
+			},
+		])
+	})
+
 	it("destroys a Podman sandbox", async () => {
 		const runner = fakePodmanRunner([{ exitCode: 0, stdout: "", stderr: "" }])
 		const runtime = new PodmanRuntime({ commandRunner: runner.run })
@@ -487,14 +570,20 @@ function fakePodmanRunner(results: Array<PodmanCommandResult | Result<PodmanComm
 	}
 }
 
-function podmanHandle(): SandboxHandle {
+function podmanHandle(options: { readonly timeoutSeconds?: number } = {}): SandboxHandle {
+	const metadata: Record<string, string | number> = {
+		name: "sandhost-run-run_123",
+	}
+
+	if (options.timeoutSeconds !== undefined) {
+		metadata.timeoutSeconds = options.timeoutSeconds
+	}
+
 	return {
 		id: "container-id",
 		runtime: "podman",
 		runId: asId("run", "run_123"),
-		metadata: {
-			name: "sandhost-run-run_123",
-		},
+		metadata,
 	}
 }
 
@@ -503,13 +592,23 @@ function callRecord(
 	args: readonly string[],
 	options: PodmanCommandOptions | undefined,
 ): FakePodmanCall {
-	if (options === undefined || options.cwd === undefined) {
+	if (options === undefined || (options.cwd === undefined && options.timeoutMs === undefined)) {
 		return { command, args: [...args] }
+	}
+
+	const recordedOptions: { cwd?: string; timeoutMs?: number } = {}
+
+	if (options.cwd !== undefined) {
+		recordedOptions.cwd = options.cwd
+	}
+
+	if (options.timeoutMs !== undefined) {
+		recordedOptions.timeoutMs = options.timeoutMs
 	}
 
 	return {
 		command,
 		args: [...args],
-		options: { cwd: options.cwd },
+		options: recordedOptions,
 	}
 }

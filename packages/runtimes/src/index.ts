@@ -95,12 +95,15 @@ export interface SandboxRuntime {
 
 export type PodmanCommandOptions = {
 	readonly cwd?: string
+	readonly timeoutMs?: number
 }
 
 export type PodmanCommandResult = {
-	readonly exitCode: number
+	readonly exitCode: number | null
 	readonly stdout: string
 	readonly stderr: string
+	readonly timedOut?: boolean
+	readonly signal?: string
 }
 
 export type PodmanCommandRunner = (
@@ -239,6 +242,7 @@ export class PodmanRuntime implements SandboxRuntime {
 				name,
 				network: input.network,
 				resources: input.resources,
+				timeoutSeconds: input.timeoutSeconds,
 				workdir,
 			},
 		})
@@ -261,7 +265,11 @@ export class PodmanRuntime implements SandboxRuntime {
 			container: container.value,
 			runnerPath: this.runnerPath,
 		})
-		const result = await this.runner(this.command, args)
+		const result = await this.runner(
+			this.command,
+			args,
+			podmanTimeoutOptions(podmanCommandTimeoutSeconds(handle, command)),
+		)
 		const finishedAt = new Date()
 
 		if (!result.ok) {
@@ -269,7 +277,7 @@ export class PodmanRuntime implements SandboxRuntime {
 		}
 
 		return ok({
-			status: result.value.exitCode === 0 ? "succeeded" : "failed",
+			status: podmanCommandStatus(result.value),
 			exitCode: result.value.exitCode,
 			stdout: result.value.stdout,
 			stderr: result.value.stderr,
@@ -380,6 +388,10 @@ export async function defaultPodmanCommandRunner(
 		execOptions.cwd = options.cwd
 	}
 
+	if (options.timeoutMs !== undefined) {
+		execOptions.timeout = options.timeoutMs
+	}
+
 	try {
 		const result = await execFileAsync(command, [...args], execOptions)
 
@@ -391,6 +403,10 @@ export async function defaultPodmanCommandRunner(
 	} catch (error) {
 		if (!isExecFileError(error)) {
 			throw error
+		}
+
+		if (isExecFileTimeout(error, options)) {
+			return ok(podmanTimedOutResult(error))
 		}
 
 		if (typeof error.code === "number") {
@@ -553,6 +569,39 @@ function podmanWorkdirArgs(workdir: string | undefined): readonly string[] {
 	return workdir === undefined ? [] : ["--workdir", workdir]
 }
 
+function podmanCommandTimeoutSeconds(
+	handle: SandboxHandle,
+	command: CommandSpec,
+): number | undefined {
+	if (command.timeoutSeconds !== undefined) {
+		return command.timeoutSeconds
+	}
+
+	if (isRecord(handle.metadata) && typeof handle.metadata.timeoutSeconds === "number") {
+		return handle.metadata.timeoutSeconds
+	}
+
+	return undefined
+}
+
+function podmanTimeoutOptions(
+	timeoutSeconds: number | undefined,
+): PodmanCommandOptions | undefined {
+	if (timeoutSeconds === undefined) {
+		return undefined
+	}
+
+	return { timeoutMs: timeoutSeconds * 1000 }
+}
+
+function podmanCommandStatus(result: PodmanCommandResult): SandboxCommandStatus {
+	if (result.timedOut === true) {
+		return "timed_out"
+	}
+
+	return result.exitCode === 0 ? "succeeded" : "failed"
+}
+
 function podmanSandboxName(runId: RunId): string {
 	return `sandhost-run-${String(runId).replaceAll(/[^a-zA-Z0-9_.-]/g, "-")}`
 }
@@ -621,6 +670,18 @@ function commandFailureDetails(
 		details.cwd = options.cwd
 	}
 
+	if (options.timeoutMs !== undefined) {
+		details.timeoutMs = options.timeoutMs
+	}
+
+	if (result.timedOut === true) {
+		details.timedOut = true
+	}
+
+	if (result.signal !== undefined) {
+		details.signal = result.signal
+	}
+
 	return details
 }
 
@@ -628,9 +689,12 @@ function isRecord(value: unknown): value is Record<string, JsonValue> {
 	return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
-type ExecFileError = NodeJS.ErrnoException & {
+type ExecFileError = Error & {
+	readonly code?: string | number | null
 	readonly stdout?: string | Buffer
 	readonly stderr?: string | Buffer
+	readonly killed?: boolean
+	readonly signal?: string | null
 }
 
 function isExecFileError(error: unknown): error is ExecFileError {
@@ -643,4 +707,19 @@ function execOutputToString(output: string | Buffer | undefined): string {
 	}
 
 	return Buffer.isBuffer(output) ? output.toString("utf8") : output
+}
+
+function isExecFileTimeout(error: ExecFileError, options: PodmanCommandOptions): boolean {
+	return options.timeoutMs !== undefined && error.killed === true
+}
+
+function podmanTimedOutResult(error: ExecFileError): PodmanCommandResult {
+	const result: PodmanCommandResult = {
+		exitCode: null,
+		stdout: execOutputToString(error.stdout),
+		stderr: execOutputToString(error.stderr),
+		timedOut: true,
+	}
+
+	return typeof error.signal === "string" ? { ...result, signal: error.signal } : result
 }
