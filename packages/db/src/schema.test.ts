@@ -1,0 +1,84 @@
+import { getTableColumns } from "drizzle-orm"
+import { describe, expect, it } from "vitest"
+
+import {
+	agentKindEnum,
+	auditEventTypeEnum,
+	createdAtColumn,
+	databaseSchemaName,
+	grantScopeEnum,
+	grantStatusEnum,
+	hostPlatformEnum,
+	idColumn,
+	idColumnLength,
+	metadataJsonColumn,
+	networkModeEnum,
+	optionalTimestampColumn,
+	requiredTimestampColumn,
+	runStatusEnum,
+	sandboxRuntimeEnum,
+	sandhostSchema,
+} from "./index.js"
+
+describe("database schema foundation", () => {
+	it("uses the hosted sandhost Postgres schema", () => {
+		expect(databaseSchemaName).toBe("sandhost")
+		expect(sandhostSchema.schemaName).toBe("sandhost")
+	})
+
+	it("defines native enum values for hosted metadata", () => {
+		expect(hostPlatformEnum.enumValues).toEqual(["linux-wsl"])
+		expect(agentKindEnum.enumValues).toEqual(["codex"])
+		expect(grantScopeEnum.enumValues).toEqual(["one_shot", "project_window"])
+		expect(grantStatusEnum.enumValues).toEqual([
+			"pending",
+			"approved",
+			"denied",
+			"expired",
+			"revoked",
+		])
+		expect(runStatusEnum.enumValues).toEqual([
+			"queued",
+			"running",
+			"succeeded",
+			"failed",
+			"cancelled",
+			"timed_out",
+		])
+		expect(auditEventTypeEnum.enumValues).toContain("artifact.uploaded")
+		expect(networkModeEnum.enumValues).toEqual(["none", "default"])
+		expect(sandboxRuntimeEnum.enumValues).toEqual(["podman", "docker", "kubernetes"])
+	})
+
+	it("keeps enum definitions inside the sandhost schema", () => {
+		expect(hostPlatformEnum.schema).toBe("sandhost")
+		expect(agentKindEnum.schema).toBe("sandhost")
+		expect(grantScopeEnum.schema).toBe("sandhost")
+		expect(grantStatusEnum.schema).toBe("sandhost")
+		expect(runStatusEnum.schema).toBe("sandhost")
+		expect(auditEventTypeEnum.schema).toBe("sandhost")
+		expect(networkModeEnum.schema).toBe("sandhost")
+		expect(sandboxRuntimeEnum.schema).toBe("sandhost")
+	})
+
+	it("provides reusable column builders with DB defaults", () => {
+		const probeTable = sandhostSchema.table("schema_probe", {
+			id: idColumn().primaryKey(),
+			createdAt: createdAtColumn(),
+			startedAt: optionalTimestampColumn("started_at"),
+			finishedAt: requiredTimestampColumn("finished_at"),
+			metadata: metadataJsonColumn(),
+		})
+		const columns = getTableColumns(probeTable)
+
+		expect(columns.id.getSQLType()).toBe(`varchar(${idColumnLength})`)
+		expect(columns.id.primary).toBe(true)
+		expect(columns.createdAt.getSQLType()).toBe("timestamp with time zone")
+		expect(columns.createdAt.notNull).toBe(true)
+		expect(columns.createdAt.hasDefault).toBe(true)
+		expect(columns.startedAt.notNull).toBe(false)
+		expect(columns.finishedAt.notNull).toBe(true)
+		expect(columns.metadata.getSQLType()).toBe("jsonb")
+		expect(columns.metadata.notNull).toBe(true)
+	})
+})

@@ -8,5 +8,9 @@
 	},
 	"scripts": {
 		"typecheck": "tsc -p tsconfig.json --noEmit"
+	},
+	"dependencies": {
+		"@sando/shared": "workspace:*",
+		"drizzle-orm": "^0.45.2"
 	}
 }
