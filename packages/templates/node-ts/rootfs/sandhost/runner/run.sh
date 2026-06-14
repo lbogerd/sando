@@ -16,6 +16,14 @@ mkdir -p "$workspace" "$artifacts"
 
 cd "$workspace"
 
+create_baseline_commit() {
+	git init --quiet
+	git config user.email "sandhost@example.local"
+	git config user.name "sandhost"
+	git add -A
+	git commit --quiet --allow-empty -m "sandhost baseline"
+}
+
 reset_capture_files() {
 	: > "$stdout_file"
 	: > "$stderr_file"
@@ -36,11 +44,13 @@ run_captured() {
 }
 
 if [[ "$#" -gt 0 ]]; then
+	create_baseline_commit
 	run_captured "$@"
 	exit "$?"
 fi
 
 if [[ -n "${SANDHOST_COMMAND:-}" ]]; then
+	create_baseline_commit
 	run_captured bash -lc "$SANDHOST_COMMAND"
 	exit "$?"
 fi

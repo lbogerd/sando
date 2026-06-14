@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process"
-import { mkdir, mkdtemp, readFile, rm, stat } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -109,6 +109,29 @@ describe("node-ts sandbox runner script", () => {
 		expect(logs).toContain("err\n")
 	})
 
+	it("creates a baseline git commit before argv commands run", async () => {
+		const { artifacts, workspace } = await tempSandboxDirs()
+		await writeFile(join(workspace, "source.txt"), "before\n")
+
+		await execFileAsync(
+			nodeTsRunnerScriptPath,
+			["bash", "-lc", 'printf "after\\n" >> source.txt'],
+			{
+				env: sandboxEnv(workspace, artifacts),
+			},
+		)
+
+		await expect(git(workspace, ["log", "-1", "--format=%s%n%an%n%ae"])).resolves.toMatchObject({
+			stdout: "sandhost baseline\nsandhost\nsandhost@example.local\n",
+		})
+		await expect(git(workspace, ["show", "HEAD:source.txt"])).resolves.toMatchObject({
+			stdout: "before\n",
+		})
+		await expect(git(workspace, ["diff", "--", "source.txt"])).resolves.toMatchObject({
+			stdout: expect.stringContaining("+after"),
+		})
+	})
+
 	it("runs SANDHOST_COMMAND when no argv command is provided", async () => {
 		const { artifacts, workspace } = await tempSandboxDirs()
 
@@ -140,6 +163,24 @@ describe("node-ts sandbox runner script", () => {
 		const logs = await readFile(join(artifacts, "logs.txt"), "utf8")
 		expect(logs).toContain("cmd-out\n")
 		expect(logs).toContain("cmd-err\n")
+	})
+
+	it("creates a baseline git commit for empty workspaces", async () => {
+		const { artifacts, workspace } = await tempSandboxDirs()
+
+		await execFileAsync(nodeTsRunnerScriptPath, [], {
+			env: {
+				...sandboxEnv(workspace, artifacts),
+				SANDHOST_COMMAND: "true",
+			},
+		})
+
+		await expect(git(workspace, ["rev-parse", "--verify", "HEAD"])).resolves.toMatchObject({
+			stdout: expect.stringMatching(/^[0-9a-f]{40}\n$/),
+		})
+		await expect(git(workspace, ["log", "-1", "--format=%s"])).resolves.toMatchObject({
+			stdout: "sandhost baseline\n",
+		})
 	})
 
 	it("fails with usage when no command is provided", async () => {
@@ -179,4 +220,11 @@ function sandboxEnv(workspace: string, artifacts: string): NodeJS.ProcessEnv {
 		SANDHOST_WORKSPACE: workspace,
 		SANDHOST_ARTIFACTS: artifacts,
 	}
+}
+
+function git(cwd: string, args: readonly string[]) {
+	return execFileAsync("git", [...args], {
+		cwd,
+		env: process.env,
+	})
 }

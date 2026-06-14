@@ -21,7 +21,7 @@
 -[x] Implement CPU/memory flags
 -[x] Implement timeout handling
 -[x] Capture stdout/stderr/logs
--[ ] Generate baseline git commit inside sandbox
+-[x] Generate baseline git commit inside sandbox
 -[ ] Generate diff.patch and changed-files.txt
 -[ ] Copy artifacts to .sandhost/runs/<runId>
 -[ ] Write result.json
