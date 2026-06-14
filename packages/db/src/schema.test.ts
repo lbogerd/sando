@@ -6,6 +6,7 @@ import {
 	account,
 	agent,
 	agentKindEnum,
+	artifact,
 	auditEventTypeEnum,
 	betterAuthSchema,
 	createdAtColumn,
@@ -337,5 +338,59 @@ describe("database schema foundation", () => {
 		expect(
 			grantIndex?.config.columns.map((column) => ("name" in column ? column.name : undefined)),
 		).toEqual(["grant_id"])
+	})
+
+	it("defines the Artifact metadata table", () => {
+		const columns = getTableColumns(artifact)
+		const config = getTableConfig(artifact)
+
+		expect(config.name).toBe("artifact")
+		expect(config.schema).toBe("sandhost")
+		expect(columns.id.primary).toBe(true)
+		expect(columns.runId.notNull).toBe(true)
+		expect(columns.runId.getSQLType()).toBe(`varchar(${idColumnLength})`)
+		expect(columns.projectId.notNull).toBe(true)
+		expect(columns.projectId.getSQLType()).toBe(`varchar(${idColumnLength})`)
+		expect(columns.name.notNull).toBe(true)
+		expect(columns.name.getSQLType()).toBe("text")
+		expect(columns.path.notNull).toBe(true)
+		expect(columns.path.getSQLType()).toBe("text")
+		expect(columns.contentType.notNull).toBe(false)
+		expect(columns.contentType.getSQLType()).toBe("text")
+		expect(columns.sizeBytes.notNull).toBe(false)
+		expect(columns.sizeBytes.getSQLType()).toBe("integer")
+		expect(columns.uploadThingKey.notNull).toBe(true)
+		expect(columns.uploadThingKey.getSQLType()).toBe("text")
+		expect(columns.private.notNull).toBe(true)
+		expect(columns.private.hasDefault).toBe(true)
+		expect(columns.private.getSQLType()).toBe("boolean")
+		expect(columns.createdAt.notNull).toBe(true)
+		expect(columns.createdAt.hasDefault).toBe(true)
+		expect(columns.retentionExpiresAt.notNull).toBe(false)
+		expect(columns.retentionExpiresAt.getSQLType()).toBe("timestamp with time zone")
+	})
+
+	it("indexes artifacts by run and storage identity", () => {
+		const config = getTableConfig(artifact)
+		const runIndex = config.indexes.find((index) => index.config.name === "artifact_run_idx")
+		const uploadKeyIndex = config.indexes.find(
+			(index) => index.config.name === "artifact_upload_thing_key_unique",
+		)
+		const runPathIndex = config.indexes.find(
+			(index) => index.config.name === "artifact_run_path_unique",
+		)
+
+		expect(runIndex?.config.unique).toBe(false)
+		expect(
+			runIndex?.config.columns.map((column) => ("name" in column ? column.name : undefined)),
+		).toEqual(["run_id"])
+		expect(uploadKeyIndex?.config.unique).toBe(true)
+		expect(
+			uploadKeyIndex?.config.columns.map((column) => ("name" in column ? column.name : undefined)),
+		).toEqual(["upload_thing_key"])
+		expect(runPathIndex?.config.unique).toBe(true)
+		expect(
+			runPathIndex?.config.columns.map((column) => ("name" in column ? column.name : undefined)),
+		).toEqual(["run_id", "path"])
 	})
 })

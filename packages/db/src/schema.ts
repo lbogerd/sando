@@ -306,3 +306,32 @@ export const run = sandhostSchema.table(
 
 export type Run = InferSelectModel<typeof run>
 export type NewRun = InferInsertModel<typeof run>
+
+export const artifact = sandhostSchema.table(
+	"artifact",
+	{
+		id: idColumn().primaryKey(),
+		runId: idColumn("run_id")
+			.notNull()
+			.references(() => run.id, { onDelete: "cascade" }),
+		projectId: idColumn("project_id")
+			.notNull()
+			.references(() => project.id, { onDelete: "cascade" }),
+		name: text("name").notNull(),
+		path: text("path").notNull(),
+		contentType: text("content_type"),
+		sizeBytes: integer("size_bytes"),
+		uploadThingKey: text("upload_thing_key").notNull(),
+		private: boolean("private").notNull().default(true),
+		createdAt: createdAtColumn(),
+		retentionExpiresAt: optionalTimestampColumn("retention_expires_at"),
+	},
+	(table) => [
+		index("artifact_run_idx").on(table.runId),
+		uniqueIndex("artifact_upload_thing_key_unique").on(table.uploadThingKey),
+		uniqueIndex("artifact_run_path_unique").on(table.runId, table.path),
+	],
+)
+
+export type Artifact = InferSelectModel<typeof artifact>
+export type NewArtifact = InferInsertModel<typeof artifact>

@@ -37,7 +37,7 @@
 -[x] Add Agent table
 -[x] Add Grant table
 -[x] Add Run table
--[ ] Add Artifact table
+-[x] Add Artifact table
 -[ ] Add AuditEvent table
 -[ ] Add API route: register/get project
 -[ ] Add API route: register host
