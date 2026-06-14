@@ -126,6 +126,14 @@ export const sandboxRuntimeKindSchema = z.enum(sandboxRuntimeKinds, {
 
 export type SandboxRuntimeKind = z.infer<typeof sandboxRuntimeKindSchema>
 
+export const hostPlatforms = ["linux-wsl"] as const
+
+export const hostPlatformSchema = z.enum(hostPlatforms, {
+	error: "Expected a supported host platform.",
+})
+
+export type HostPlatform = z.infer<typeof hostPlatformSchema>
+
 const nonEmptyStringSchema = z
 	.string()
 	.refine((value) => value.trim().length > 0, "Expected a non-empty string.")
@@ -401,6 +409,77 @@ export function parseProjectRegistrationResult(value: unknown): Result<ProjectRe
 
 export function isProjectRegistrationResult(value: unknown): value is ProjectRegistrationResult {
 	return parseProjectRegistrationResult(value).ok
+}
+
+export const hostRecordSchema = z.object({
+	id: idSchema("host", "Expected a host ID."),
+	userId: idSchema("user", "Expected a user ID."),
+	name: nonEmptyStringSchema,
+	platform: hostPlatformSchema,
+	runtime: sandboxRuntimeKindSchema,
+	fingerprint: nonEmptyStringSchema,
+	createdAt: nonEmptyStringSchema,
+	lastSeenAt: nonEmptyStringSchema,
+})
+
+export type HostRecord = z.infer<typeof hostRecordSchema>
+
+export const registerHostInputSchema = z.object({
+	name: nonEmptyStringSchema,
+	platform: hostPlatformSchema,
+	runtime: sandboxRuntimeKindSchema,
+	fingerprint: nonEmptyStringSchema,
+})
+
+export type RegisterHostInput = z.infer<typeof registerHostInputSchema>
+
+export const hostRegistrationResultSchema = z.object({
+	host: hostRecordSchema,
+	created: z.boolean(),
+})
+
+export type HostRegistrationResult = z.infer<typeof hostRegistrationResultSchema>
+
+export function parseHostRecord(value: unknown): Result<HostRecord> {
+	const result = hostRecordSchema.safeParse(value)
+
+	if (!result.success) {
+		return err(validationError("Invalid host record.", result.error))
+	}
+
+	return ok(result.data)
+}
+
+export function isHostRecord(value: unknown): value is HostRecord {
+	return parseHostRecord(value).ok
+}
+
+export function parseRegisterHostInput(value: unknown): Result<RegisterHostInput> {
+	const result = registerHostInputSchema.safeParse(value)
+
+	if (!result.success) {
+		return err(validationError("Invalid register host input.", result.error))
+	}
+
+	return ok(result.data)
+}
+
+export function isRegisterHostInput(value: unknown): value is RegisterHostInput {
+	return parseRegisterHostInput(value).ok
+}
+
+export function parseHostRegistrationResult(value: unknown): Result<HostRegistrationResult> {
+	const result = hostRegistrationResultSchema.safeParse(value)
+
+	if (!result.success) {
+		return err(validationError("Invalid host registration result.", result.error))
+	}
+
+	return ok(result.data)
+}
+
+export function isHostRegistrationResult(value: unknown): value is HostRegistrationResult {
+	return parseHostRegistrationResult(value).ok
 }
 
 function validationError(message: string, error: z.ZodError): SandoError {

@@ -5,10 +5,11 @@ import { pathToFileURL } from "node:url"
 import { authBasePath, type SandhostAuth } from "@sando/auth"
 import { runProjectCommandInputMetadata, sandoPolicyMetadata } from "@sando/shared"
 
+import type { CurrentUserResolver } from "./current-user.js"
+import { createHostRoutes, createMemoryHostRepository, type HostRepository } from "./hosts.js"
 import {
 	createMemoryProjectRepository,
 	createProjectRoutes,
-	type CurrentUserResolver,
 	type ProjectRepository,
 } from "./projects.js"
 
@@ -19,6 +20,7 @@ export type HostedAppOptions = {
 	readonly auth?: Pick<SandhostAuth, "handler">
 	readonly now?: () => Date
 	readonly currentUser?: CurrentUserResolver
+	readonly hostRepository?: HostRepository
 	readonly projectRepository?: ProjectRepository
 }
 
@@ -30,6 +32,7 @@ export type HostedServerOptions = HostedAppOptions & {
 export function createHostedApp(options: HostedAppOptions = {}): Hono {
 	const now = options.now ?? (() => new Date())
 	const currentUser = options.currentUser ?? (() => null)
+	const hostRepository = options.hostRepository ?? createMemoryHostRepository()
 	const projectRepository = options.projectRepository ?? createMemoryProjectRepository()
 	const app = new Hono()
 	const auth = options.auth
@@ -81,6 +84,14 @@ export function createHostedApp(options: HostedAppOptions = {}): Hono {
 			projectRepository,
 		}),
 	)
+	v1.route(
+		"/",
+		createHostRoutes({
+			currentUser,
+			hostRepository,
+			now,
+		}),
+	)
 
 	app.route(`/${apiVersion}`, v1)
 
@@ -122,6 +133,7 @@ export function serveHostedApp(options: HostedServerOptions = {}): ServerType {
 		...(options.auth === undefined ? {} : { auth: options.auth }),
 		...(options.now === undefined ? {} : { now: options.now }),
 		...(options.currentUser === undefined ? {} : { currentUser: options.currentUser }),
+		...(options.hostRepository === undefined ? {} : { hostRepository: options.hostRepository }),
 		...(options.projectRepository === undefined
 			? {}
 			: { projectRepository: options.projectRepository }),

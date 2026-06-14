@@ -9,17 +9,11 @@ import {
 	type ProjectRecord,
 	type ProjectRegistrationResult,
 	type RegisterProjectInput,
-	type SandoError,
 	type UserId,
 } from "@sando/shared"
 
-export type CurrentUser = {
-	readonly userId: UserId
-}
-
-export type CurrentUserResolver = (
-	request: Request,
-) => CurrentUser | null | Promise<CurrentUser | null>
+import type { CurrentUserResolver } from "./current-user.js"
+import { readJsonBody, unauthorizedError } from "./http.js"
 
 export type RegisterProjectCommand = RegisterProjectInput & {
 	readonly userId: UserId
@@ -183,33 +177,4 @@ export function createProjectRoutes(options: ProjectRoutesOptions): Hono {
 
 function projectFingerprintKey(userId: UserId, localFingerprint: string): string {
 	return `${userId}\0${localFingerprint}`
-}
-
-async function readJsonBody(
-	request: Request,
-): Promise<
-	| { readonly ok: true; readonly value: unknown }
-	| { readonly ok: false; readonly error: SandoError }
-> {
-	try {
-		return {
-			ok: true,
-			value: await request.json(),
-		}
-	} catch {
-		return {
-			ok: false,
-			error: sandoError({
-				code: "VALIDATION_FAILED",
-				message: "Expected a JSON request body.",
-			}),
-		}
-	}
-}
-
-function unauthorizedError(): SandoError {
-	return sandoError({
-		code: "UNAUTHORIZED",
-		message: "Authentication required.",
-	})
 }

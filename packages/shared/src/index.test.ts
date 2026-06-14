@@ -4,16 +4,23 @@ import {
 	asId,
 	defaultSandoPolicy,
 	err,
+	hostPlatforms,
+	isHostRecord,
 	isIdOfKind,
 	isProjectRecord,
 	isProjectRegistrationResult,
+	isHostRegistrationResult,
+	isRegisterHostInput,
 	isRegisterProjectInput,
 	isRunProjectCommandInput,
 	isRunProjectCommandResult,
 	isSandoPolicy,
 	ok,
+	parseHostRecord,
+	parseHostRegistrationResult,
 	parseProjectRecord,
 	parseProjectRegistrationResult,
+	parseRegisterHostInput,
 	parseRegisterProjectInput,
 	parseRunProjectCommandInput,
 	parseRunProjectCommandResult,
@@ -259,6 +266,94 @@ describe("project registration schemas", () => {
 					{ path: "$.localFingerprint", message: "Expected a non-empty string." },
 					{ path: "$.policyId", message: "Expected a policy ID." },
 					{ path: "$.createdAt", message: "Expected a non-empty string." },
+				],
+			})
+		}
+	})
+})
+
+describe("host registration schemas", () => {
+	it("exposes supported host platforms", () => {
+		expect(hostPlatforms).toEqual(["linux-wsl"])
+	})
+
+	it("accepts valid host registration input and result payloads", () => {
+		const input = {
+			name: "WSL dev box",
+			platform: "linux-wsl",
+			runtime: "podman",
+			fingerprint: "wsl:ubuntu:machine-id",
+		}
+		const host = {
+			id: "host_123",
+			userId: "user_123",
+			name: "WSL dev box",
+			platform: "linux-wsl",
+			runtime: "podman",
+			fingerprint: "wsl:ubuntu:machine-id",
+			createdAt: "2026-06-14T17:30:00.000Z",
+			lastSeenAt: "2026-06-14T17:30:00.000Z",
+		}
+		const registration = {
+			host,
+			created: true,
+		}
+
+		expect(parseRegisterHostInput(input)).toEqual({ ok: true, value: input })
+		expect(isRegisterHostInput(input)).toBe(true)
+		expect(parseHostRecord(host)).toEqual({ ok: true, value: host })
+		expect(isHostRecord(host)).toBe(true)
+		expect(parseHostRegistrationResult(registration)).toEqual({
+			ok: true,
+			value: registration,
+		})
+		expect(isHostRegistrationResult(registration)).toBe(true)
+	})
+
+	it("rejects invalid host registration input and records", () => {
+		const input = parseRegisterHostInput({
+			name: "",
+			platform: "macos",
+			runtime: "vm",
+			fingerprint: "",
+		})
+		const host = parseHostRecord({
+			id: "proj_123",
+			userId: "host_123",
+			name: "",
+			platform: "windows",
+			runtime: "containerd",
+			fingerprint: "",
+			createdAt: "",
+			lastSeenAt: "",
+		})
+
+		expect(input.ok).toBe(false)
+		if (!input.ok) {
+			expect(input.error.code).toBe("VALIDATION_FAILED")
+			expect(input.error.details).toEqual({
+				issues: [
+					{ path: "$.name", message: "Expected a non-empty string." },
+					{ path: "$.platform", message: "Expected a supported host platform." },
+					{ path: "$.runtime", message: "Expected a supported sandbox runtime." },
+					{ path: "$.fingerprint", message: "Expected a non-empty string." },
+				],
+			})
+		}
+
+		expect(host.ok).toBe(false)
+		if (!host.ok) {
+			expect(host.error.code).toBe("VALIDATION_FAILED")
+			expect(host.error.details).toEqual({
+				issues: [
+					{ path: "$.id", message: "Expected a host ID." },
+					{ path: "$.userId", message: "Expected a user ID." },
+					{ path: "$.name", message: "Expected a non-empty string." },
+					{ path: "$.platform", message: "Expected a supported host platform." },
+					{ path: "$.runtime", message: "Expected a supported sandbox runtime." },
+					{ path: "$.fingerprint", message: "Expected a non-empty string." },
+					{ path: "$.createdAt", message: "Expected a non-empty string." },
+					{ path: "$.lastSeenAt", message: "Expected a non-empty string." },
 				],
 			})
 		}
