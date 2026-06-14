@@ -6,8 +6,9 @@
 - pnpm `10.30.3`, as declared in the root `package.json`.
 - Linux or WSL for the eventual Podman runtime path.
 
-The current repository skeleton does not require Podman to run typechecks or
-tests. Podman will be required when the runtime adapter is implemented.
+Most repository checks do not require Podman. Runtime tests use injectable
+command runners, and the diagnostics spike reports local Podman health without
+requiring the test suite to shell out to a real Podman install.
 
 ## Install
 
@@ -75,6 +76,16 @@ Adapters should:
   artifacts;
 - destroy local resources after each run;
 - return structured `Result` values for expected failures.
+
+## WSL And Podman Diagnostics
+
+`diagnosePodmanEnvironment` in `packages/runtimes` is the Phase 1 spike for the
+future `sandhost doctor` command. It checks WSL detection, `podman --version`,
+`podman info --format json`, and whether Podman reports rootless mode.
+
+The diagnostic function accepts an injected command runner so tests can cover
+healthy, missing, and rootful Podman cases without depending on the developer's
+local machine.
 
 ## Todo Workflow
 

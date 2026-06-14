@@ -7,7 +7,7 @@
 -[x] Define SandboxRuntime interface
 -[x] Define RunProjectCommand input/result schema
 -[x] Add dev docs: architecture.md, local-dev.md
-[ ] Phase 1
+[x] Phase 1
 -[x] Implement project root detection
 -[x] Implement .sandhost/policy.json loader
 -[x] Implement effective policy compiler
@@ -27,4 +27,4 @@
 -[x] Write result.json
 -[x] Add cleanup-on-error/finally handling
 -[x] Add integration fixture repo
--[ ] Add WSL/Podman diagnostics spike
+-[x] Add WSL/Podman diagnostics spike

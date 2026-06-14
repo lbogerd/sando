@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process"
 import type { ExecFileOptionsWithStringEncoding } from "node:child_process"
-import { mkdir, readdir, rm, stat, writeFile } from "node:fs/promises"
+import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises"
+import { release as currentOsRelease } from "node:os"
 import { join, relative, resolve, sep } from "node:path"
 import { promisify } from "node:util"
 
@@ -11,6 +12,7 @@ import type {
 	Result,
 	RunId,
 	SandboxRuntimeKind,
+	SandoError,
 } from "@sando/shared"
 import { err, ok, sandoError } from "@sando/shared"
 
@@ -24,6 +26,7 @@ export const defaultPodmanRunnerPath = "/sandhost/runner/run.sh"
 export const defaultPodmanWorkspacePath = "/workspace"
 export const defaultPodmanArtifactPath = "/artifacts"
 export const defaultPodmanRunsRootPath = ".sandhost/runs"
+export const defaultPodmanDiagnosticsTimeoutMs = 5000
 
 export type SandboxHandle = {
 	readonly id: string
@@ -207,6 +210,40 @@ export type PodmanImageRef = {
 	readonly action: PodmanImageAction
 	readonly stdout: string
 	readonly stderr: string
+}
+
+export type PodmanDiagnosticStatus = "pass" | "warn" | "fail"
+
+export type PodmanDiagnosticCheck = {
+	readonly name: string
+	readonly status: PodmanDiagnosticStatus
+	readonly message: string
+	readonly details?: JsonValue
+}
+
+export type WslDiagnostics = {
+	readonly detected: boolean
+	readonly platform: string
+	readonly osRelease: string
+	readonly sources: readonly string[]
+	readonly interopAvailable: boolean
+	readonly distroName?: string
+}
+
+export type PodmanDiagnostics = {
+	readonly podmanExecutable: string
+	readonly wsl: WslDiagnostics
+	readonly checks: readonly PodmanDiagnosticCheck[]
+}
+
+export type DiagnosePodmanEnvironmentInput = {
+	readonly podmanExecutable?: string
+	readonly commandRunner?: PodmanCommandRunner
+	readonly environment?: Readonly<Record<string, string | undefined>>
+	readonly platform?: string
+	readonly osRelease?: string
+	readonly procVersion?: string
+	readonly timeoutMs?: number
 }
 
 export type PodmanRuntimeOptions = {
@@ -559,6 +596,76 @@ export async function defaultPodmanCommandRunner(
 			}),
 		)
 	}
+}
+
+export async function diagnosePodmanEnvironment(
+	input: DiagnosePodmanEnvironmentInput = {},
+): Promise<Result<PodmanDiagnostics>> {
+	const command = input.podmanExecutable ?? defaultPodmanExecutable
+	const runner = input.commandRunner ?? defaultPodmanCommandRunner
+	const timeoutMs = input.timeoutMs ?? defaultPodmanDiagnosticsTimeoutMs
+	const wsl = await detectWslEnvironment(input)
+	const checks: PodmanDiagnosticCheck[] = [wslDiagnosticCheck(wsl)]
+	const versionArgs = ["--version"]
+	const version = await runner(command, versionArgs, { timeoutMs })
+
+	checks.push(podmanVersionDiagnosticCheck(command, versionArgs, version))
+
+	if (!isSuccessfulPodmanCommand(version)) {
+		return ok({
+			podmanExecutable: command,
+			wsl,
+			checks,
+		})
+	}
+
+	const infoArgs = ["info", "--format", "json"]
+	const info = await runner(command, infoArgs, { timeoutMs })
+
+	if (!info.ok) {
+		checks.push(
+			podmanRunnerErrorCheck(
+				"podman.info",
+				"Could not run podman info.",
+				command,
+				infoArgs,
+				info.error,
+			),
+		)
+	} else if (info.value.exitCode !== 0) {
+		checks.push(
+			podmanCommandExitCheck("podman.info", "podman info failed.", command, infoArgs, info.value),
+		)
+	} else {
+		const summary = parsePodmanInfoSummary(info.value.stdout)
+
+		if (!summary.ok) {
+			checks.push({
+				name: "podman.info",
+				status: "warn",
+				message: "Podman info ran but did not return JSON diagnostics.",
+				details: {
+					command,
+					args: infoArgs,
+					errorMessage: summary.error.message,
+				},
+			})
+		} else {
+			checks.push({
+				name: "podman.info",
+				status: "pass",
+				message: "Podman info is available.",
+				details: podmanInfoSummaryDetails(summary.value),
+			})
+			checks.push(podmanRootlessDiagnosticCheck(summary.value))
+		}
+	}
+
+	return ok({
+		podmanExecutable: command,
+		wsl,
+		checks,
+	})
 }
 
 async function buildPodmanImage(
@@ -1011,6 +1118,337 @@ function commandFailureDetails(
 	}
 
 	return details
+}
+
+async function detectWslEnvironment(
+	input: DiagnosePodmanEnvironmentInput,
+): Promise<WslDiagnostics> {
+	const environment = input.environment ?? process.env
+	const platform = input.platform ?? process.platform
+	const osRelease = input.osRelease ?? currentOsRelease()
+	const procVersion =
+		input.procVersion ?? (platform === "linux" ? await readLinuxProcVersion() : "")
+	const sources: string[] = []
+
+	if (environment.WSL_DISTRO_NAME !== undefined) {
+		sources.push("WSL_DISTRO_NAME")
+	}
+
+	if (environment.WSL_INTEROP !== undefined) {
+		sources.push("WSL_INTEROP")
+	}
+
+	if (containsWslMarker(osRelease)) {
+		sources.push("os.release")
+	}
+
+	if (containsWslMarker(procVersion)) {
+		sources.push("/proc/version")
+	}
+
+	const diagnostics: WslDiagnostics = {
+		detected: sources.length > 0,
+		platform,
+		osRelease,
+		sources,
+		interopAvailable: environment.WSL_INTEROP !== undefined,
+	}
+
+	return environment.WSL_DISTRO_NAME === undefined
+		? diagnostics
+		: { ...diagnostics, distroName: environment.WSL_DISTRO_NAME }
+}
+
+function wslDiagnosticCheck(wsl: WslDiagnostics): PodmanDiagnosticCheck {
+	if (wsl.detected) {
+		return {
+			name: "wsl",
+			status: "pass",
+			message: "WSL environment detected.",
+			details: wslDiagnosticDetails(wsl),
+		}
+	}
+
+	if (wsl.platform === "linux") {
+		return {
+			name: "wsl",
+			status: "pass",
+			message: "WSL was not detected; plain Linux hosts can use the same Podman runtime.",
+			details: wslDiagnosticDetails(wsl),
+		}
+	}
+
+	return {
+		name: "wsl",
+		status: "warn",
+		message: "WSL or Linux was not detected; the MVP Podman runtime targets Linux and WSL.",
+		details: wslDiagnosticDetails(wsl),
+	}
+}
+
+function podmanVersionDiagnosticCheck(
+	command: string,
+	args: readonly string[],
+	result: Result<PodmanCommandResult>,
+): PodmanDiagnosticCheck {
+	if (!result.ok) {
+		return podmanRunnerErrorCheck(
+			"podman.executable",
+			"Podman executable is not available.",
+			command,
+			args,
+			result.error,
+		)
+	}
+
+	if (result.value.exitCode !== 0) {
+		return podmanCommandExitCheck(
+			"podman.executable",
+			"Podman version check failed.",
+			command,
+			args,
+			result.value,
+		)
+	}
+
+	return {
+		name: "podman.executable",
+		status: "pass",
+		message: "Podman executable is available.",
+		details: commandResultDiagnosticDetails(command, args, result.value),
+	}
+}
+
+function podmanRootlessDiagnosticCheck(summary: PodmanInfoSummary): PodmanDiagnosticCheck {
+	if (summary.rootless === true) {
+		return {
+			name: "podman.rootless",
+			status: "pass",
+			message: "Podman is running in rootless mode.",
+			details: podmanInfoSummaryDetails(summary),
+		}
+	}
+
+	if (summary.rootless === false) {
+		return {
+			name: "podman.rootless",
+			status: "warn",
+			message: "Podman is running rootful; sandhost prefers rootless Podman.",
+			details: podmanInfoSummaryDetails(summary),
+		}
+	}
+
+	return {
+		name: "podman.rootless",
+		status: "warn",
+		message: "Could not determine whether Podman is rootless.",
+		details: podmanInfoSummaryDetails(summary),
+	}
+}
+
+function podmanRunnerErrorCheck(
+	name: string,
+	message: string,
+	command: string,
+	args: readonly string[],
+	error: SandoError,
+): PodmanDiagnosticCheck {
+	return {
+		name,
+		status: "fail",
+		message,
+		details: {
+			command,
+			args: [...args],
+			errorCode: error.code,
+			errorMessage: error.message,
+			...(error.details === undefined ? {} : { errorDetails: error.details }),
+		},
+	}
+}
+
+function podmanCommandExitCheck(
+	name: string,
+	message: string,
+	command: string,
+	args: readonly string[],
+	result: PodmanCommandResult,
+): PodmanDiagnosticCheck {
+	return {
+		name,
+		status: "fail",
+		message,
+		details: commandResultDiagnosticDetails(command, args, result),
+	}
+}
+
+function isSuccessfulPodmanCommand(result: Result<PodmanCommandResult>): boolean {
+	return result.ok && result.value.exitCode === 0
+}
+
+type PodmanInfoSummary = {
+	rootless?: boolean
+	version?: string
+	os?: string
+	arch?: string
+	cgroupManager?: string
+	cgroupVersion?: string
+	serviceIsRemote?: boolean
+}
+
+function parsePodmanInfoSummary(stdout: string): Result<PodmanInfoSummary> {
+	try {
+		const parsed = JSON.parse(stdout) as unknown
+
+		if (!isUnknownRecord(parsed)) {
+			return err(
+				sandoError({
+					code: "VALIDATION_FAILED",
+					message: "Expected podman info output to be a JSON object.",
+				}),
+			)
+		}
+
+		const host = getRecordProperty(parsed, "host")
+		const security = host === undefined ? undefined : getRecordProperty(host, "security")
+		const version = getRecordProperty(parsed, "version")
+		const summary: PodmanInfoSummary = {}
+		const rootless = security?.rootless
+
+		if (typeof rootless === "boolean") {
+			summary.rootless = rootless
+		}
+
+		assignStringSummary(summary, "version", version?.Version ?? version?.version)
+		assignStringSummary(summary, "os", host?.os)
+		assignStringSummary(summary, "arch", host?.arch)
+		assignStringSummary(summary, "cgroupManager", host?.cgroupManager)
+		assignStringSummary(summary, "cgroupVersion", host?.cgroupVersion)
+
+		if (typeof host?.serviceIsRemote === "boolean") {
+			summary.serviceIsRemote = host.serviceIsRemote
+		}
+
+		return ok(summary)
+	} catch (error) {
+		return err(
+			sandoError({
+				code: "VALIDATION_FAILED",
+				message: "Could not parse podman info JSON output.",
+				details: {
+					errorMessage: error instanceof Error ? error.message : String(error),
+				},
+			}),
+		)
+	}
+}
+
+function assignStringSummary(
+	summary: PodmanInfoSummary,
+	key: keyof Omit<PodmanInfoSummary, "rootless" | "serviceIsRemote">,
+	value: unknown,
+): void {
+	if (typeof value === "string" && value.length > 0) {
+		summary[key] = value
+	}
+}
+
+function podmanInfoSummaryDetails(summary: PodmanInfoSummary): JsonValue {
+	const details: Record<string, JsonValue> = {}
+
+	if (summary.rootless !== undefined) {
+		details.rootless = summary.rootless
+	}
+
+	if (summary.version !== undefined) {
+		details.version = summary.version
+	}
+
+	if (summary.os !== undefined) {
+		details.os = summary.os
+	}
+
+	if (summary.arch !== undefined) {
+		details.arch = summary.arch
+	}
+
+	if (summary.cgroupManager !== undefined) {
+		details.cgroupManager = summary.cgroupManager
+	}
+
+	if (summary.cgroupVersion !== undefined) {
+		details.cgroupVersion = summary.cgroupVersion
+	}
+
+	if (summary.serviceIsRemote !== undefined) {
+		details.serviceIsRemote = summary.serviceIsRemote
+	}
+
+	return details
+}
+
+function commandResultDiagnosticDetails(
+	command: string,
+	args: readonly string[],
+	result: PodmanCommandResult,
+): JsonValue {
+	const details: Record<string, JsonValue> = {
+		command,
+		args: [...args],
+		exitCode: result.exitCode,
+		stdout: result.stdout,
+		stderr: result.stderr,
+	}
+
+	if (result.timedOut === true) {
+		details.timedOut = true
+	}
+
+	if (result.signal !== undefined) {
+		details.signal = result.signal
+	}
+
+	return details
+}
+
+function wslDiagnosticDetails(wsl: WslDiagnostics): JsonValue {
+	const details: Record<string, JsonValue> = {
+		detected: wsl.detected,
+		platform: wsl.platform,
+		osRelease: wsl.osRelease,
+		sources: [...wsl.sources],
+		interopAvailable: wsl.interopAvailable,
+	}
+
+	if (wsl.distroName !== undefined) {
+		details.distroName = wsl.distroName
+	}
+
+	return details
+}
+
+async function readLinuxProcVersion(): Promise<string> {
+	try {
+		return await readFile("/proc/version", "utf8")
+	} catch {
+		return ""
+	}
+}
+
+function containsWslMarker(value: string): boolean {
+	return /microsoft|wsl/i.test(value)
+}
+
+function getRecordProperty(
+	record: Record<string, unknown>,
+	key: string,
+): Record<string, unknown> | undefined {
+	const value = record[key]
+	return isUnknownRecord(value) ? value : undefined
+}
+
+function isUnknownRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
 function isRecord(value: unknown): value is Record<string, JsonValue> {

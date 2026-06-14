@@ -5,6 +5,7 @@ import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 
 import {
+	diagnosePodmanEnvironment,
 	defaultNodeTsPodmanImage,
 	defaultPodmanCommandRunner,
 	ensurePodmanImage,
@@ -234,6 +235,224 @@ describe("defaultPodmanCommandRunner", () => {
 				stdout: "",
 				stderr: "",
 				timedOut: true,
+			})
+		}
+	})
+})
+
+describe("diagnosePodmanEnvironment", () => {
+	it("reports WSL and healthy rootless Podman diagnostics", async () => {
+		const runner = fakePodmanRunner([
+			{ exitCode: 0, stdout: "podman version 5.0.0\n", stderr: "" },
+			{
+				exitCode: 0,
+				stdout: JSON.stringify({
+					host: {
+						arch: "amd64",
+						cgroupManager: "systemd",
+						cgroupVersion: "v2",
+						os: "linux",
+						security: {
+							rootless: true,
+						},
+						serviceIsRemote: false,
+					},
+					version: {
+						Version: "5.0.0",
+					},
+				}),
+				stderr: "",
+			},
+		])
+
+		await expect(
+			diagnosePodmanEnvironment({
+				commandRunner: runner.run,
+				environment: {
+					WSL_DISTRO_NAME: "Ubuntu",
+					WSL_INTEROP: "/run/WSL/123_interop",
+				},
+				platform: "linux",
+				osRelease: "5.15.90.1-microsoft-standard-WSL2",
+				procVersion: "Linux version 5.15.90.1-microsoft-standard-WSL2",
+			}),
+		).resolves.toEqual({
+			ok: true,
+			value: {
+				podmanExecutable: "podman",
+				wsl: {
+					detected: true,
+					platform: "linux",
+					osRelease: "5.15.90.1-microsoft-standard-WSL2",
+					sources: ["WSL_DISTRO_NAME", "WSL_INTEROP", "os.release", "/proc/version"],
+					interopAvailable: true,
+					distroName: "Ubuntu",
+				},
+				checks: [
+					{
+						name: "wsl",
+						status: "pass",
+						message: "WSL environment detected.",
+						details: {
+							detected: true,
+							platform: "linux",
+							osRelease: "5.15.90.1-microsoft-standard-WSL2",
+							sources: ["WSL_DISTRO_NAME", "WSL_INTEROP", "os.release", "/proc/version"],
+							interopAvailable: true,
+							distroName: "Ubuntu",
+						},
+					},
+					{
+						name: "podman.executable",
+						status: "pass",
+						message: "Podman executable is available.",
+						details: {
+							command: "podman",
+							args: ["--version"],
+							exitCode: 0,
+							stdout: "podman version 5.0.0\n",
+							stderr: "",
+						},
+					},
+					{
+						name: "podman.info",
+						status: "pass",
+						message: "Podman info is available.",
+						details: {
+							rootless: true,
+							version: "5.0.0",
+							os: "linux",
+							arch: "amd64",
+							cgroupManager: "systemd",
+							cgroupVersion: "v2",
+							serviceIsRemote: false,
+						},
+					},
+					{
+						name: "podman.rootless",
+						status: "pass",
+						message: "Podman is running in rootless mode.",
+						details: {
+							rootless: true,
+							version: "5.0.0",
+							os: "linux",
+							arch: "amd64",
+							cgroupManager: "systemd",
+							cgroupVersion: "v2",
+							serviceIsRemote: false,
+						},
+					},
+				],
+			},
+		})
+		expect(runner.calls).toEqual([
+			{
+				command: "podman",
+				args: ["--version"],
+				options: { timeoutMs: 5000 },
+			},
+			{
+				command: "podman",
+				args: ["info", "--format", "json"],
+				options: { timeoutMs: 5000 },
+			},
+		])
+	})
+
+	it("reports missing Podman without running later probes", async () => {
+		const runner = fakePodmanRunner([
+			err(
+				sandoError({
+					code: "RUNTIME_UNAVAILABLE",
+					message: "Podman executable is not available.",
+					details: { command: "podman" },
+				}),
+			),
+		])
+
+		const result = await diagnosePodmanEnvironment({
+			commandRunner: runner.run,
+			environment: {},
+			platform: "linux",
+			osRelease: "6.8.0",
+			procVersion: "",
+		})
+
+		expect(result.ok).toBe(true)
+		if (result.ok) {
+			expect(result.value.checks).toEqual([
+				{
+					name: "wsl",
+					status: "pass",
+					message: "WSL was not detected; plain Linux hosts can use the same Podman runtime.",
+					details: {
+						detected: false,
+						platform: "linux",
+						osRelease: "6.8.0",
+						sources: [],
+						interopAvailable: false,
+					},
+				},
+				{
+					name: "podman.executable",
+					status: "fail",
+					message: "Podman executable is not available.",
+					details: {
+						command: "podman",
+						args: ["--version"],
+						errorCode: "RUNTIME_UNAVAILABLE",
+						errorMessage: "Podman executable is not available.",
+						errorDetails: { command: "podman" },
+					},
+				},
+			])
+		}
+		expect(runner.calls).toEqual([
+			{
+				command: "podman",
+				args: ["--version"],
+				options: { timeoutMs: 5000 },
+			},
+		])
+	})
+
+	it("warns when Podman is available but rootful", async () => {
+		const runner = fakePodmanRunner([
+			{ exitCode: 0, stdout: "podman version 5.0.0\n", stderr: "" },
+			{
+				exitCode: 0,
+				stdout: JSON.stringify({
+					host: {
+						security: {
+							rootless: false,
+						},
+					},
+					version: {
+						Version: "5.0.0",
+					},
+				}),
+				stderr: "",
+			},
+		])
+
+		const result = await diagnosePodmanEnvironment({
+			commandRunner: runner.run,
+			environment: {},
+			platform: "linux",
+			osRelease: "6.8.0",
+			procVersion: "",
+		})
+
+		expect(result.ok).toBe(true)
+		if (result.ok) {
+			expect(result.value.checks.at(-1)).toEqual({
+				name: "podman.rootless",
+				status: "warn",
+				message: "Podman is running rootful; sandhost prefers rootless Podman.",
+				details: {
+					rootless: false,
+					version: "5.0.0",
+				},
 			})
 		}
 	})
