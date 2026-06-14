@@ -8,7 +8,7 @@
 -[x] Define RunProjectCommand input/result schema
 -[x] Add dev docs: architecture.md, local-dev.md
 [ ] Phase 1
--[ ] Implement project root detection
+-[x] Implement project root detection
 -[ ] Implement .sandhost/policy.json loader
 -[ ] Implement effective policy compiler
 -[ ] Implement archive file selection using git ls-files -co --exclude-standard

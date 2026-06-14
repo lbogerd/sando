@@ -52,7 +52,11 @@ importers:
 
   packages/db: {}
 
-  packages/runners: {}
+  packages/runners:
+    dependencies:
+      '@sando/shared':
+        specifier: workspace:*
+        version: link:../shared
 
   packages/runtimes:
     dependencies:
