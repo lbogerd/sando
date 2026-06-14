@@ -28,7 +28,7 @@
 -[x] Add cleanup-on-error/finally handling
 -[x] Add integration fixture repo
 -[x] Add WSL/Podman diagnostics spike
-[ ] Phase 2 - Hosted control plane metadata
+[x] Phase 2 - Hosted control plane metadata
 -[x] Create hosted app | use Hono
 -[x] Add database schema
 -[x] Add Better Auth user login | make sure to update schema with better auth tables
@@ -46,4 +46,4 @@
 -[x] Add API route: append audit event
 -[x] Add API route: list run artifacts
 -[x] Implement @sandhost/cli | give it basic functionality. Do NOT worry about keeping parity with the test scripts
--[ ] Store local auth session securely enough for MVP | .env is fine for the MVP
+-[x] Store local auth session securely enough for MVP | .env is fine for the MVP

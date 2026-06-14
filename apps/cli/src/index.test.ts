@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest"
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
 import { defaultSandoPolicy } from "@sando/shared"
 
-import { appName, cliVersion, runCli } from "./index.js"
+import { appName, cliVersion, formatSessionEnv, readLocalAuthSession, runCli } from "./index.js"
 
 describe("sandhost CLI", () => {
 	it("prints help", () => {
@@ -84,6 +87,7 @@ describe("sandhost CLI", () => {
 	it("prints a small doctor report", () => {
 		const result = runCli(["doctor"], {
 			SANDHOST_API_URL: "https://api.example.test",
+			SANDHOST_SESSION_FILE: "/tmp/sandhost-session.env",
 			WSL_DISTRO_NAME: "Ubuntu",
 		})
 
@@ -91,6 +95,7 @@ describe("sandhost CLI", () => {
 		expect(JSON.parse(result.stdout)).toMatchObject({
 			apiUrl: "https://api.example.test",
 			defaultNetwork: "none",
+			sessionFile: "/tmp/sandhost-session.env",
 			wsl: {
 				detected: true,
 				distroName: "Ubuntu",
@@ -104,5 +109,99 @@ describe("sandhost CLI", () => {
 		expect(result.exitCode).toBe(64)
 		expect(result.stdout).toBe("")
 		expect(result.stderr).toContain("Unknown command: wat")
+	})
+
+	it("stores, redacts, and clears local auth sessions", () => {
+		const root = mkdtempSync(join(tmpdir(), "sandhost-cli-"))
+		const sessionFile = join(root, ".sandhost", ".env")
+
+		try {
+			const saved = runCli([
+				"auth",
+				"save",
+				"--token",
+				"secret-token",
+				"--api-url",
+				"https://api.example.test",
+				"--user-id",
+				"user_123",
+				"--session-file",
+				sessionFile,
+			])
+
+			expect(saved.exitCode).toBe(0)
+			expect(saved.stdout).toContain(sessionFile)
+			expect(readFileSync(sessionFile, "utf8")).toContain('SANDHOST_SESSION_TOKEN="secret-token"')
+			expect(readLocalAuthSession(sessionFile)).toEqual({
+				token: "secret-token",
+				apiUrl: "https://api.example.test",
+				userId: "user_123",
+			})
+
+			const shown = runCli(["auth", "show", "--session-file", sessionFile])
+
+			expect(shown.exitCode).toBe(0)
+			expect(JSON.parse(shown.stdout)).toEqual({
+				authenticated: true,
+				sessionFile,
+				apiUrl: "https://api.example.test",
+				token: "set",
+				userId: "user_123",
+			})
+			expect(shown.stdout).not.toContain("secret-token")
+
+			const cleared = runCli(["auth", "clear", "--session-file", sessionFile])
+
+			expect(cleared.exitCode).toBe(0)
+			expect(existsSync(sessionFile)).toBe(false)
+		} finally {
+			rmSync(root, { recursive: true, force: true })
+		}
+	})
+
+	it("uses environment values when saving local auth sessions", () => {
+		const root = mkdtempSync(join(tmpdir(), "sandhost-cli-"))
+		const sessionFile = join(root, ".sandhost", ".env")
+
+		try {
+			const saved = runCli(["login", "--session-file", sessionFile], {
+				SANDHOST_API_URL: "https://api.example.test",
+				SANDHOST_SESSION_TOKEN: "env-token",
+			})
+
+			expect(saved.exitCode).toBe(0)
+			expect(readLocalAuthSession(sessionFile)).toEqual({
+				token: "env-token",
+				apiUrl: "https://api.example.test",
+			})
+		} finally {
+			rmSync(root, { recursive: true, force: true })
+		}
+	})
+
+	it("reports missing local auth sessions", () => {
+		const root = mkdtempSync(join(tmpdir(), "sandhost-cli-"))
+		const sessionFile = join(root, ".sandhost", ".env")
+
+		try {
+			const result = runCli(["auth", "show", "--session-file", sessionFile])
+
+			expect(result.exitCode).toBe(0)
+			expect(JSON.parse(result.stdout)).toEqual({
+				authenticated: false,
+				sessionFile,
+			})
+		} finally {
+			rmSync(root, { recursive: true, force: true })
+		}
+	})
+
+	it("formats quoted session env values", () => {
+		expect(
+			formatSessionEnv({
+				token: "tok en",
+				apiUrl: "https://api.example.test",
+			}),
+		).toContain('SANDHOST_SESSION_TOKEN="tok en"')
 	})
 })
