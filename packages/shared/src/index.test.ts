@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest"
 
 import {
+	auditEventTypes,
 	asId,
 	defaultSandoPolicy,
 	err,
+	isAppendAuditEventInput,
+	isAppendAuditEventResult,
+	isAuditEventRecord,
 	hostPlatforms,
 	isCreateRunInput,
 	isCreateRunResult,
@@ -21,6 +25,9 @@ import {
 	isRunRecord,
 	isSandoPolicy,
 	ok,
+	parseAppendAuditEventInput,
+	parseAppendAuditEventResult,
+	parseAuditEventRecord,
 	parseCreateRunInput,
 	parseCreateRunResult,
 	parseFinishRunInput,
@@ -523,6 +530,96 @@ describe("run metadata schemas", () => {
 					{ path: "$.status", message: "Expected a terminal run status." },
 					{ path: "$.exitCode", message: "Expected null or a non-negative integer." },
 					{ path: "$.durationMs", message: "Expected a non-negative integer." },
+				],
+			})
+		}
+	})
+})
+
+describe("audit event schemas", () => {
+	it("exposes supported audit event types", () => {
+		expect(auditEventTypes).toEqual([
+			"agent.registered",
+			"host.registered",
+			"project.initialized",
+			"grant.requested",
+			"grant.approved",
+			"grant.denied",
+			"capability.executed",
+			"run.created",
+			"workspace.archived",
+			"sandbox.created",
+			"command.started",
+			"command.finished",
+			"artifact.uploaded",
+			"diff.created",
+			"sandbox.destroyed",
+			"grant.expired",
+		])
+	})
+
+	it("accepts valid append audit event input and result payloads", () => {
+		const input = {
+			type: "command.finished",
+			projectId: "proj_123",
+			hostId: "host_123",
+			agentId: "agent_123",
+			grantId: "grant_123",
+			runId: "run_123",
+			metadata: {
+				exitCode: 1,
+				command: "pnpm test",
+				flags: ["ci", "unit"],
+				success: false,
+			},
+		}
+		const auditEvent = {
+			id: "audit_123",
+			userId: "user_123",
+			timestamp: "2026-06-14T18:00:00.000Z",
+			...input,
+		}
+		const result = { auditEvent }
+
+		expect(parseAppendAuditEventInput(input)).toEqual({ ok: true, value: input })
+		expect(isAppendAuditEventInput(input)).toBe(true)
+		expect(parseAuditEventRecord(auditEvent)).toEqual({ ok: true, value: auditEvent })
+		expect(isAuditEventRecord(auditEvent)).toBe(true)
+		expect(parseAppendAuditEventResult(result)).toEqual({ ok: true, value: result })
+		expect(isAppendAuditEventResult(result)).toBe(true)
+	})
+
+	it("defaults append audit event metadata to an empty object", () => {
+		expect(parseAppendAuditEventInput({ type: "run.created" })).toEqual({
+			ok: true,
+			value: {
+				type: "run.created",
+				metadata: {},
+			},
+		})
+	})
+
+	it("rejects invalid append audit event input", () => {
+		const result = parseAppendAuditEventInput({
+			type: "unknown",
+			projectId: "run_123",
+			hostId: "proj_123",
+			agentId: "host_123",
+			grantId: "agent_123",
+			runId: "grant_123",
+		})
+
+		expect(result.ok).toBe(false)
+		if (!result.ok) {
+			expect(result.error.code).toBe("VALIDATION_FAILED")
+			expect(result.error.details).toEqual({
+				issues: [
+					{ path: "$.type", message: "Expected a supported audit event type." },
+					{ path: "$.projectId", message: "Expected a project ID." },
+					{ path: "$.hostId", message: "Expected a host ID." },
+					{ path: "$.agentId", message: "Expected an agent ID." },
+					{ path: "$.grantId", message: "Expected a grant ID." },
+					{ path: "$.runId", message: "Expected a run ID." },
 				],
 			})
 		}

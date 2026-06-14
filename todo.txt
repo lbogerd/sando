@@ -43,7 +43,7 @@
 -[x] Add API route: register host
 -[x] Add API route: create run
 -[x] Add API route: finish run
--[ ] Add API route: append audit event
+-[x] Add API route: append audit event
 -[ ] Add API route: list run artifacts
 -[ ] Implement @sandhost/cli | give it basic functionality. Do NOT worry about keeping parity with the test scripts
 -[ ] Store local auth session securely enough for MVP | .env is fine for the MVP

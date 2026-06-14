@@ -5,6 +5,11 @@ import { pathToFileURL } from "node:url"
 import { authBasePath, type SandhostAuth } from "@sando/auth"
 import { runProjectCommandInputMetadata, sandoPolicyMetadata } from "@sando/shared"
 
+import {
+	createAuditEventRoutes,
+	createMemoryAuditEventRepository,
+	type AuditEventRepository,
+} from "./audit-events.js"
 import type { CurrentUserResolver } from "./current-user.js"
 import { createHostRoutes, createMemoryHostRepository, type HostRepository } from "./hosts.js"
 import {
@@ -20,6 +25,7 @@ export const apiVersion = "v1"
 export type HostedAppOptions = {
 	readonly auth?: Pick<SandhostAuth, "handler">
 	readonly now?: () => Date
+	readonly auditEventRepository?: AuditEventRepository
 	readonly currentUser?: CurrentUserResolver
 	readonly hostRepository?: HostRepository
 	readonly projectRepository?: ProjectRepository
@@ -33,6 +39,7 @@ export type HostedServerOptions = HostedAppOptions & {
 
 export function createHostedApp(options: HostedAppOptions = {}): Hono {
 	const now = options.now ?? (() => new Date())
+	const auditEventRepository = options.auditEventRepository ?? createMemoryAuditEventRepository()
 	const currentUser = options.currentUser ?? (() => null)
 	const hostRepository = options.hostRepository ?? createMemoryHostRepository()
 	const projectRepository = options.projectRepository ?? createMemoryProjectRepository()
@@ -103,6 +110,14 @@ export function createHostedApp(options: HostedAppOptions = {}): Hono {
 			runRepository,
 		}),
 	)
+	v1.route(
+		"/",
+		createAuditEventRoutes({
+			auditEventRepository,
+			currentUser,
+			now,
+		}),
+	)
 
 	app.route(`/${apiVersion}`, v1)
 
@@ -143,6 +158,9 @@ export function serveHostedApp(options: HostedServerOptions = {}): ServerType {
 	const hostedApp = createHostedApp({
 		...(options.auth === undefined ? {} : { auth: options.auth }),
 		...(options.now === undefined ? {} : { now: options.now }),
+		...(options.auditEventRepository === undefined
+			? {}
+			: { auditEventRepository: options.auditEventRepository }),
 		...(options.currentUser === undefined ? {} : { currentUser: options.currentUser }),
 		...(options.hostRepository === undefined ? {} : { hostRepository: options.hostRepository }),
 		...(options.projectRepository === undefined

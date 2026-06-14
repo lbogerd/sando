@@ -7,6 +7,8 @@ declare const idBrand: unique symbol
 export type JsonPrimitive = string | number | boolean | null
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue }
 
+const jsonValueSchema: z.ZodType<JsonValue> = z.json()
+
 export type Id<Kind extends string> = string & {
 	readonly [idBrand]: Kind
 }
@@ -133,6 +135,35 @@ export const hostPlatformSchema = z.enum(hostPlatforms, {
 })
 
 export type HostPlatform = z.infer<typeof hostPlatformSchema>
+
+export const auditEventTypes = [
+	"agent.registered",
+	"host.registered",
+	"project.initialized",
+	"grant.requested",
+	"grant.approved",
+	"grant.denied",
+	"capability.executed",
+	"run.created",
+	"workspace.archived",
+	"sandbox.created",
+	"command.started",
+	"command.finished",
+	"artifact.uploaded",
+	"diff.created",
+	"sandbox.destroyed",
+	"grant.expired",
+] as const
+
+export const auditEventTypeSchema = z.enum(auditEventTypes, {
+	error: "Expected a supported audit event type.",
+})
+
+export type AuditEventType = z.infer<typeof auditEventTypeSchema>
+
+export const auditMetadataSchema = z.record(z.string(), jsonValueSchema)
+
+export type AuditMetadata = z.infer<typeof auditMetadataSchema>
 
 const nonEmptyStringSchema = z
 	.string()
@@ -611,6 +642,81 @@ export function parseFinishRunResult(value: unknown): Result<FinishRunResult> {
 
 export function isFinishRunResult(value: unknown): value is FinishRunResult {
 	return parseFinishRunResult(value).ok
+}
+
+export const auditEventRecordSchema = z.object({
+	id: idSchema("auditEvent", "Expected an audit event ID."),
+	type: auditEventTypeSchema,
+	userId: idSchema("user", "Expected a user ID."),
+	projectId: idSchema("project", "Expected a project ID.").optional(),
+	hostId: idSchema("host", "Expected a host ID.").optional(),
+	agentId: idSchema("agent", "Expected an agent ID.").optional(),
+	grantId: idSchema("grant", "Expected a grant ID.").optional(),
+	runId: idSchema("run", "Expected a run ID.").optional(),
+	timestamp: nonEmptyStringSchema,
+	metadata: auditMetadataSchema,
+})
+
+export type AuditEventRecord = z.infer<typeof auditEventRecordSchema>
+
+export const appendAuditEventInputSchema = z.object({
+	type: auditEventTypeSchema,
+	projectId: idSchema("project", "Expected a project ID.").optional(),
+	hostId: idSchema("host", "Expected a host ID.").optional(),
+	agentId: idSchema("agent", "Expected an agent ID.").optional(),
+	grantId: idSchema("grant", "Expected a grant ID.").optional(),
+	runId: idSchema("run", "Expected a run ID.").optional(),
+	metadata: auditMetadataSchema.default({}),
+})
+
+export type AppendAuditEventInput = z.infer<typeof appendAuditEventInputSchema>
+
+export const appendAuditEventResultSchema = z.object({
+	auditEvent: auditEventRecordSchema,
+})
+
+export type AppendAuditEventResult = z.infer<typeof appendAuditEventResultSchema>
+
+export function parseAuditEventRecord(value: unknown): Result<AuditEventRecord> {
+	const result = auditEventRecordSchema.safeParse(value)
+
+	if (!result.success) {
+		return err(validationError("Invalid audit event record.", result.error))
+	}
+
+	return ok(result.data)
+}
+
+export function isAuditEventRecord(value: unknown): value is AuditEventRecord {
+	return parseAuditEventRecord(value).ok
+}
+
+export function parseAppendAuditEventInput(value: unknown): Result<AppendAuditEventInput> {
+	const result = appendAuditEventInputSchema.safeParse(value)
+
+	if (!result.success) {
+		return err(validationError("Invalid append audit event input.", result.error))
+	}
+
+	return ok(result.data)
+}
+
+export function isAppendAuditEventInput(value: unknown): value is AppendAuditEventInput {
+	return parseAppendAuditEventInput(value).ok
+}
+
+export function parseAppendAuditEventResult(value: unknown): Result<AppendAuditEventResult> {
+	const result = appendAuditEventResultSchema.safeParse(value)
+
+	if (!result.success) {
+		return err(validationError("Invalid append audit event result.", result.error))
+	}
+
+	return ok(result.data)
+}
+
+export function isAppendAuditEventResult(value: unknown): value is AppendAuditEventResult {
+	return parseAppendAuditEventResult(value).ok
 }
 
 function validationError(message: string, error: z.ZodError): SandoError {
