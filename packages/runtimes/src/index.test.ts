@@ -243,6 +243,7 @@ describe("PodmanRuntime", () => {
 					artifactDir: "/artifacts",
 					image: defaultNodeTsPodmanImage,
 					name: "sandhost-run-run_123",
+					network: "none",
 					workdir: "/workspace",
 				},
 			},
@@ -258,6 +259,8 @@ describe("PodmanRuntime", () => {
 					"create",
 					"--name",
 					"sandhost-run-run_123",
+					"--network",
+					"none",
 					"--workdir",
 					"/workspace",
 					"--env",
@@ -276,6 +279,49 @@ describe("PodmanRuntime", () => {
 				args: ["start", "sandhost-run-run_123"],
 			},
 		])
+	})
+
+	it("creates default-network sandboxes without overriding Podman's default network", async () => {
+		const runner = fakePodmanRunner([
+			{ exitCode: 0, stdout: "container-id\n", stderr: "" },
+			{ exitCode: 0, stdout: "started\n", stderr: "" },
+		])
+		const runtime = new PodmanRuntime({ commandRunner: runner.run })
+		const result = await runtime.createSandbox({
+			runId: asId("run", "run_123"),
+			template: "node-ts",
+			runtime: "podman",
+			network: "default",
+			resources: {
+				cpu: 2,
+				memoryMb: 4096,
+			},
+			timeoutSeconds: 600,
+		})
+
+		expect(result.ok).toBe(true)
+		expect(runner.calls[0]).toEqual({
+			command: "podman",
+			args: [
+				"create",
+				"--name",
+				"sandhost-run-run_123",
+				"--workdir",
+				"/workspace",
+				"--env",
+				"SANDHOST_ARTIFACTS=/artifacts",
+				"--env",
+				"SANDHOST_WORKSPACE=/workspace",
+				defaultNodeTsPodmanImage,
+				"sleep",
+				"infinity",
+			],
+		})
+		if (result.ok) {
+			expect(result.value.metadata).toMatchObject({
+				network: "default",
+			})
+		}
 	})
 
 	it("returns a sandbox failure when create fails", async () => {
@@ -308,6 +354,8 @@ describe("PodmanRuntime", () => {
 					"create",
 					"--name",
 					"sandhost-run-run_123",
+					"--network",
+					"none",
 					"--workdir",
 					"/workspace",
 					"--env",

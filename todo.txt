@@ -17,7 +17,7 @@
 -[x] Add sandbox runner script inside image
 -[x] Implement Podman image build/pull path
 -[x] Implement Podman create/run/destroy
--[ ] Implement network modes: none/default
+-[x] Implement network modes: none/default
 -[ ] Implement CPU/memory flags
 -[ ] Implement timeout handling
 -[ ] Capture stdout/stderr/logs
