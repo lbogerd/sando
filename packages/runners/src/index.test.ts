@@ -4,7 +4,9 @@ import { tmpdir } from "node:os"
 
 import { afterEach, describe, expect, it } from "vitest"
 
-import { findProjectRoot } from "./index.js"
+import { defaultSandoPolicy } from "@sando/shared"
+
+import { findProjectRoot, loadProjectPolicy, projectPolicyFilePath } from "./index.js"
 
 const tempRoots: string[] = []
 
@@ -95,8 +97,107 @@ describe("findProjectRoot", () => {
 	})
 })
 
+describe("loadProjectPolicy", () => {
+	it("loads and validates a sandhost policy from the detected project root", async () => {
+		const root = await tempProject()
+		const nested = join(root, "packages", "app")
+		const policy = {
+			...defaultSandoPolicy,
+			defaultNetwork: "default",
+			maxTimeoutSeconds: 120,
+		}
+
+		await mkdir(nested, { recursive: true })
+		await writePolicy(root, policy)
+
+		await expect(loadProjectPolicy({ startPath: nested })).resolves.toEqual({
+			ok: true,
+			value: {
+				projectRoot: root,
+				path: join(root, projectPolicyFilePath),
+				policy,
+			},
+		})
+	})
+
+	it("can load from an explicit project root", async () => {
+		const root = await tempProject()
+		await writePolicy(root, defaultSandoPolicy)
+
+		await expect(loadProjectPolicy({ projectRoot: root })).resolves.toEqual({
+			ok: true,
+			value: {
+				projectRoot: root,
+				path: join(root, projectPolicyFilePath),
+				policy: defaultSandoPolicy,
+			},
+		})
+	})
+
+	it("returns a not found error when the policy file is missing", async () => {
+		const root = await tempProject()
+		const policyPath = join(root, projectPolicyFilePath)
+
+		await mkdir(join(root, ".git"), { recursive: true })
+
+		const result = await loadProjectPolicy({ startPath: root })
+
+		expect(result.ok).toBe(false)
+		if (!result.ok) {
+			expect(result.error.code).toBe("NOT_FOUND")
+			expect(result.error.details).toEqual({ path: policyPath })
+		}
+	})
+
+	it("returns a validation error for malformed JSON", async () => {
+		const root = await tempProject()
+		const policyPath = join(root, projectPolicyFilePath)
+
+		await mkdir(join(root, ".sandhost"), { recursive: true })
+		await writeFile(policyPath, "{")
+
+		const result = await loadProjectPolicy({ startPath: root })
+
+		expect(result.ok).toBe(false)
+		if (!result.ok) {
+			expect(result.error.code).toBe("VALIDATION_FAILED")
+			expect(result.error.message).toBe("Sandhost policy file contains invalid JSON.")
+			expect(result.error.details).toEqual({
+				path: policyPath,
+				message: expect.any(String),
+			})
+		}
+	})
+
+	it("wraps shared policy validation errors with the policy path", async () => {
+		const root = await tempProject()
+		const policyPath = join(root, projectPolicyFilePath)
+
+		await writePolicy(root, {
+			...defaultSandoPolicy,
+			version: 2,
+		})
+
+		const result = await loadProjectPolicy({ startPath: root })
+
+		expect(result.ok).toBe(false)
+		if (!result.ok) {
+			expect(result.error.code).toBe("VALIDATION_FAILED")
+			expect(result.error.details).toEqual({ path: policyPath })
+			expect(result.error.cause?.details).toEqual({
+				issues: [{ path: "$.version", message: "Expected version 1." }],
+			})
+		}
+	})
+})
+
 async function tempProject(): Promise<string> {
 	const root = await mkdtemp(join(tmpdir(), "sando-runners-"))
 	tempRoots.push(root)
 	return root
+}
+
+async function writePolicy(root: string, policy: unknown): Promise<void> {
+	await mkdir(join(root, ".sandhost"), { recursive: true })
+	await writeFile(join(root, projectPolicyFilePath), JSON.stringify(policy, null, 2))
 }
