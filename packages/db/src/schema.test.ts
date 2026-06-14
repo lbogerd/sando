@@ -7,6 +7,7 @@ import {
 	agent,
 	agentKindEnum,
 	artifact,
+	auditEvent,
 	auditEventTypeEnum,
 	betterAuthSchema,
 	createdAtColumn,
@@ -392,5 +393,70 @@ describe("database schema foundation", () => {
 		expect(
 			runPathIndex?.config.columns.map((column) => ("name" in column ? column.name : undefined)),
 		).toEqual(["run_id", "path"])
+	})
+
+	it("defines the AuditEvent metadata table", () => {
+		const columns = getTableColumns(auditEvent)
+		const config = getTableConfig(auditEvent)
+
+		expect(config.name).toBe("audit_event")
+		expect(config.schema).toBe("sandhost")
+		expect(columns.id.primary).toBe(true)
+		expect(columns.type.notNull).toBe(true)
+		expect(columns.type.getSQLType()).toBe("audit_event_type")
+		expect(auditEventTypeEnum.schema).toBe("sandhost")
+		expect(auditEventTypeEnum.enumValues).toEqual([
+			"agent.registered",
+			"host.registered",
+			"project.initialized",
+			"grant.requested",
+			"grant.approved",
+			"grant.denied",
+			"capability.executed",
+			"run.created",
+			"workspace.archived",
+			"sandbox.created",
+			"command.started",
+			"command.finished",
+			"artifact.uploaded",
+			"diff.created",
+			"sandbox.destroyed",
+			"grant.expired",
+		])
+		expect(columns.userId.notNull).toBe(true)
+		expect(columns.projectId.notNull).toBe(false)
+		expect(columns.hostId.notNull).toBe(false)
+		expect(columns.agentId.notNull).toBe(false)
+		expect(columns.grantId.notNull).toBe(false)
+		expect(columns.runId.notNull).toBe(false)
+		expect(columns.timestamp.notNull).toBe(true)
+		expect(columns.timestamp.hasDefault).toBe(true)
+		expect(columns.timestamp.getSQLType()).toBe("timestamp with time zone")
+		expect(columns.metadata.notNull).toBe(true)
+		expect(columns.metadata.hasDefault).toBe(true)
+		expect(columns.metadata.getSQLType()).toBe("jsonb")
+	})
+
+	it("indexes audit events by user and run timelines", () => {
+		const config = getTableConfig(auditEvent)
+		const userTimelineIndex = config.indexes.find(
+			(index) => index.config.name === "audit_event_user_timestamp_idx",
+		)
+		const runTimelineIndex = config.indexes.find(
+			(index) => index.config.name === "audit_event_run_timestamp_idx",
+		)
+
+		expect(userTimelineIndex?.config.unique).toBe(false)
+		expect(
+			userTimelineIndex?.config.columns.map((column) =>
+				"name" in column ? column.name : undefined,
+			),
+		).toEqual(["user_id", "timestamp"])
+		expect(runTimelineIndex?.config.unique).toBe(false)
+		expect(
+			runTimelineIndex?.config.columns.map((column) =>
+				"name" in column ? column.name : undefined,
+			),
+		).toEqual(["run_id", "timestamp"])
 	})
 })

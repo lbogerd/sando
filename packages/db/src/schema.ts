@@ -92,6 +92,10 @@ function constraintsJsonColumn(name = "constraints") {
 	return jsonb(name).$type<MetadataJson>().notNull().default({})
 }
 
+function auditMetadataJsonColumn(name = "metadata") {
+	return jsonb(name).$type<MetadataJson>().notNull().default({})
+}
+
 function authTimestampColumn(name: string) {
 	return timestamp(name, { withTimezone: true })
 }
@@ -335,3 +339,28 @@ export const artifact = sandhostSchema.table(
 
 export type Artifact = InferSelectModel<typeof artifact>
 export type NewArtifact = InferInsertModel<typeof artifact>
+
+export const auditEvent = sandhostSchema.table(
+	"audit_event",
+	{
+		id: idColumn().primaryKey(),
+		type: auditEventTypeEnum("type").notNull(),
+		userId: idColumn("user_id")
+			.notNull()
+			.references(() => user.id, { onDelete: "cascade" }),
+		projectId: idColumn("project_id").references(() => project.id, { onDelete: "set null" }),
+		hostId: idColumn("host_id").references(() => host.id, { onDelete: "set null" }),
+		agentId: idColumn("agent_id").references(() => agent.id, { onDelete: "set null" }),
+		grantId: idColumn("grant_id").references(() => grant.id, { onDelete: "set null" }),
+		runId: idColumn("run_id").references(() => run.id, { onDelete: "set null" }),
+		timestamp: requiredTimestampColumn("timestamp").defaultNow(),
+		metadata: auditMetadataJsonColumn(),
+	},
+	(table) => [
+		index("audit_event_user_timestamp_idx").on(table.userId, table.timestamp),
+		index("audit_event_run_timestamp_idx").on(table.runId, table.timestamp),
+	],
+)
+
+export type AuditEvent = InferSelectModel<typeof auditEvent>
+export type NewAuditEvent = InferInsertModel<typeof auditEvent>
