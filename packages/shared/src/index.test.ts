@@ -5,10 +5,16 @@ import {
 	defaultSandoPolicy,
 	err,
 	isIdOfKind,
+	isProjectRecord,
+	isProjectRegistrationResult,
+	isRegisterProjectInput,
 	isRunProjectCommandInput,
 	isRunProjectCommandResult,
 	isSandoPolicy,
 	ok,
+	parseProjectRecord,
+	parseProjectRegistrationResult,
+	parseRegisterProjectInput,
 	parseRunProjectCommandInput,
 	parseRunProjectCommandResult,
 	parseSandoPolicy,
@@ -178,6 +184,81 @@ describe("run project command schemas", () => {
 					{ path: "$.logsRef", message: "Expected a sandhost URI." },
 					{ path: "$.artifacts[0].name", message: "Expected a non-empty string." },
 					{ path: "$.artifacts[0].uri", message: "Expected a sandhost URI." },
+				],
+			})
+		}
+	})
+})
+
+describe("project registration schemas", () => {
+	it("accepts valid project registration input and result payloads", () => {
+		const input = {
+			name: "Sandhost",
+			localFingerprint: "git:/workspace/sandhost#main",
+			policyId: "policy_default",
+		}
+		const project = {
+			id: "proj_123",
+			userId: "user_123",
+			name: "Sandhost",
+			localFingerprint: "git:/workspace/sandhost#main",
+			policyId: "policy_default",
+			createdAt: "2026-06-14T17:30:00.000Z",
+		}
+		const registration = {
+			project,
+			created: true,
+		}
+
+		expect(parseRegisterProjectInput(input)).toEqual({ ok: true, value: input })
+		expect(isRegisterProjectInput(input)).toBe(true)
+		expect(parseProjectRecord(project)).toEqual({ ok: true, value: project })
+		expect(isProjectRecord(project)).toBe(true)
+		expect(parseProjectRegistrationResult(registration)).toEqual({
+			ok: true,
+			value: registration,
+		})
+		expect(isProjectRegistrationResult(registration)).toBe(true)
+	})
+
+	it("rejects invalid project registration input and records", () => {
+		const input = parseRegisterProjectInput({
+			name: "",
+			localFingerprint: "",
+			policyId: "proj_123",
+		})
+		const project = parseProjectRecord({
+			id: "run_123",
+			userId: "proj_123",
+			name: "",
+			localFingerprint: "",
+			policyId: "project-policy",
+			createdAt: "",
+		})
+
+		expect(input.ok).toBe(false)
+		if (!input.ok) {
+			expect(input.error.code).toBe("VALIDATION_FAILED")
+			expect(input.error.details).toEqual({
+				issues: [
+					{ path: "$.name", message: "Expected a non-empty string." },
+					{ path: "$.localFingerprint", message: "Expected a non-empty string." },
+					{ path: "$.policyId", message: "Expected a policy ID." },
+				],
+			})
+		}
+
+		expect(project.ok).toBe(false)
+		if (!project.ok) {
+			expect(project.error.code).toBe("VALIDATION_FAILED")
+			expect(project.error.details).toEqual({
+				issues: [
+					{ path: "$.id", message: "Expected a project ID." },
+					{ path: "$.userId", message: "Expected a user ID." },
+					{ path: "$.name", message: "Expected a non-empty string." },
+					{ path: "$.localFingerprint", message: "Expected a non-empty string." },
+					{ path: "$.policyId", message: "Expected a policy ID." },
+					{ path: "$.createdAt", message: "Expected a non-empty string." },
 				],
 			})
 		}

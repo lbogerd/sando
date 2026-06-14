@@ -39,7 +39,7 @@
 -[x] Add Run table
 -[x] Add Artifact table
 -[x] Add AuditEvent table
--[ ] Add API route: register/get project
+-[x] Add API route: register/get project
 -[ ] Add API route: register host
 -[ ] Add API route: create run
 -[ ] Add API route: finish run

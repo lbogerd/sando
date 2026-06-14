@@ -335,6 +335,74 @@ export function isRunProjectCommandResult(value: unknown): value is RunProjectCo
 	return parseRunProjectCommandResult(value).ok
 }
 
+export const projectRecordSchema = z.object({
+	id: idSchema("project", "Expected a project ID."),
+	userId: idSchema("user", "Expected a user ID."),
+	name: nonEmptyStringSchema,
+	localFingerprint: nonEmptyStringSchema,
+	policyId: idSchema("policy", "Expected a policy ID."),
+	createdAt: nonEmptyStringSchema,
+})
+
+export type ProjectRecord = z.infer<typeof projectRecordSchema>
+
+export const registerProjectInputSchema = z.object({
+	name: nonEmptyStringSchema,
+	localFingerprint: nonEmptyStringSchema,
+	policyId: idSchema("policy", "Expected a policy ID."),
+})
+
+export type RegisterProjectInput = z.infer<typeof registerProjectInputSchema>
+
+export const projectRegistrationResultSchema = z.object({
+	project: projectRecordSchema,
+	created: z.boolean(),
+})
+
+export type ProjectRegistrationResult = z.infer<typeof projectRegistrationResultSchema>
+
+export function parseProjectRecord(value: unknown): Result<ProjectRecord> {
+	const result = projectRecordSchema.safeParse(value)
+
+	if (!result.success) {
+		return err(validationError("Invalid project record.", result.error))
+	}
+
+	return ok(result.data)
+}
+
+export function isProjectRecord(value: unknown): value is ProjectRecord {
+	return parseProjectRecord(value).ok
+}
+
+export function parseRegisterProjectInput(value: unknown): Result<RegisterProjectInput> {
+	const result = registerProjectInputSchema.safeParse(value)
+
+	if (!result.success) {
+		return err(validationError("Invalid register project input.", result.error))
+	}
+
+	return ok(result.data)
+}
+
+export function isRegisterProjectInput(value: unknown): value is RegisterProjectInput {
+	return parseRegisterProjectInput(value).ok
+}
+
+export function parseProjectRegistrationResult(value: unknown): Result<ProjectRegistrationResult> {
+	const result = projectRegistrationResultSchema.safeParse(value)
+
+	if (!result.success) {
+		return err(validationError("Invalid project registration result.", result.error))
+	}
+
+	return ok(result.data)
+}
+
+export function isProjectRegistrationResult(value: unknown): value is ProjectRegistrationResult {
+	return parseProjectRegistrationResult(value).ok
+}
+
 function validationError(message: string, error: z.ZodError): SandoError {
 	return sandoError({
 		code: "VALIDATION_FAILED",

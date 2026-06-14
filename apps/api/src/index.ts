@@ -5,12 +5,21 @@ import { pathToFileURL } from "node:url"
 import { authBasePath, type SandhostAuth } from "@sando/auth"
 import { runProjectCommandInputMetadata, sandoPolicyMetadata } from "@sando/shared"
 
+import {
+	createMemoryProjectRepository,
+	createProjectRoutes,
+	type CurrentUserResolver,
+	type ProjectRepository,
+} from "./projects.js"
+
 export const apiServiceName = "sandhost-api"
 export const apiVersion = "v1"
 
 export type HostedAppOptions = {
 	readonly auth?: Pick<SandhostAuth, "handler">
 	readonly now?: () => Date
+	readonly currentUser?: CurrentUserResolver
+	readonly projectRepository?: ProjectRepository
 }
 
 export type HostedServerOptions = HostedAppOptions & {
@@ -20,6 +29,8 @@ export type HostedServerOptions = HostedAppOptions & {
 
 export function createHostedApp(options: HostedAppOptions = {}): Hono {
 	const now = options.now ?? (() => new Date())
+	const currentUser = options.currentUser ?? (() => null)
+	const projectRepository = options.projectRepository ?? createMemoryProjectRepository()
 	const app = new Hono()
 	const auth = options.auth
 
@@ -62,6 +73,15 @@ export function createHostedApp(options: HostedAppOptions = {}): Hono {
 		}),
 	)
 
+	v1.route(
+		"/",
+		createProjectRoutes({
+			currentUser,
+			now,
+			projectRepository,
+		}),
+	)
+
 	app.route(`/${apiVersion}`, v1)
 
 	app.notFound((context) =>
@@ -101,6 +121,10 @@ export function serveHostedApp(options: HostedServerOptions = {}): ServerType {
 	const hostedApp = createHostedApp({
 		...(options.auth === undefined ? {} : { auth: options.auth }),
 		...(options.now === undefined ? {} : { now: options.now }),
+		...(options.currentUser === undefined ? {} : { currentUser: options.currentUser }),
+		...(options.projectRepository === undefined
+			? {}
+			: { projectRepository: options.projectRepository }),
 	})
 
 	return serve(
