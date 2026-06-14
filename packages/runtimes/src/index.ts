@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process"
 import type { ExecFileOptionsWithStringEncoding } from "node:child_process"
-import { mkdir, readdir, rm, stat } from "node:fs/promises"
+import { mkdir, readdir, rm, stat, writeFile } from "node:fs/promises"
 import { join, relative, resolve, sep } from "node:path"
 import { promisify } from "node:util"
 
@@ -68,6 +68,25 @@ export type RunResult = {
 	readonly startedAt: string
 	readonly finishedAt: string
 	readonly durationMs: number
+}
+
+export type RuntimeResultJson = {
+	readonly runId: string
+	readonly runtime: SandboxRuntimeKind
+	readonly command: string
+	readonly status: SandboxCommandStatus
+	readonly exitCode: number | null
+	readonly startedAt: string
+	readonly finishedAt: string
+	readonly durationMs: number
+	readonly network?: NetworkMode
+	readonly artifacts: {
+		readonly logs: "logs.txt"
+		readonly stdout: "stdout.txt"
+		readonly stderr: "stderr.txt"
+		readonly diff: "diff.patch"
+		readonly changedFiles: "changed-files.txt"
+	}
 }
 
 export type RuntimeArtifact = {
@@ -166,6 +185,7 @@ export class PodmanRuntime implements SandboxRuntime {
 	private readonly workspacePath: string
 	private readonly artifactPath: string
 	private readonly runsRootPath: string
+	private readonly resultsByRunId = new Map<string, RuntimeResultJson>()
 
 	constructor(options: PodmanRuntimeOptions = {}) {
 		this.command = options.podmanExecutable ?? defaultPodmanExecutable
@@ -282,7 +302,7 @@ export class PodmanRuntime implements SandboxRuntime {
 			return result
 		}
 
-		return ok({
+		const runResult = {
 			status: podmanCommandStatus(result.value),
 			exitCode: result.value.exitCode,
 			stdout: result.value.stdout,
@@ -291,7 +311,20 @@ export class PodmanRuntime implements SandboxRuntime {
 			startedAt: startedAt.toISOString(),
 			finishedAt: finishedAt.toISOString(),
 			durationMs: Math.max(0, finishedAt.getTime() - startedAt.getTime()),
-		})
+		}
+		const resultJson = runtimeResultJson(handle, command, runResult)
+		const written = await writeRuntimeResultJson(
+			runArtifactsPath(this.runsRootPath, handle.runId),
+			resultJson,
+		)
+
+		if (!written.ok) {
+			return written
+		}
+
+		this.resultsByRunId.set(String(handle.runId), resultJson)
+
+		return ok(runResult)
 	}
 
 	async collectArtifacts(handle: SandboxHandle): Promise<Result<ArtifactBundle>> {
@@ -326,6 +359,16 @@ export class PodmanRuntime implements SandboxRuntime {
 				args,
 				result.value,
 			)
+		}
+
+		const resultJson = this.resultsByRunId.get(String(handle.runId))
+
+		if (resultJson !== undefined) {
+			const written = await writeRuntimeResultJson(rootPath, resultJson)
+
+			if (!written.ok) {
+				return written
+			}
 		}
 
 		return artifactBundle(rootPath)
@@ -636,6 +679,50 @@ async function prepareRunArtifactsRoot(rootPath: string): Promise<Result<void>> 
 	}
 }
 
+function runtimeResultJson(
+	handle: SandboxHandle,
+	command: CommandSpec,
+	result: RunResult,
+): RuntimeResultJson {
+	const network = metadataNetworkMode(handle)
+	const json = {
+		runId: String(handle.runId),
+		runtime: handle.runtime,
+		command: command.command,
+		status: result.status,
+		exitCode: result.exitCode,
+		startedAt: result.startedAt,
+		finishedAt: result.finishedAt,
+		durationMs: result.durationMs,
+		artifacts: {
+			logs: "logs.txt",
+			stdout: "stdout.txt",
+			stderr: "stderr.txt",
+			diff: "diff.patch",
+			changedFiles: "changed-files.txt",
+		},
+	} satisfies RuntimeResultJson
+
+	return network === undefined ? json : { ...json, network }
+}
+
+async function writeRuntimeResultJson(
+	rootPath: string,
+	result: RuntimeResultJson,
+): Promise<Result<string>> {
+	try {
+		await mkdir(rootPath, { recursive: true })
+
+		const path = join(rootPath, "result.json")
+		await writeFile(path, `${JSON.stringify(result, null, "\t")}\n`, "utf8")
+		return ok(path)
+	} catch (error) {
+		return fileSystemFailure("Could not write run result file.", error, {
+			rootPath,
+		})
+	}
+}
+
 async function artifactBundle(rootPath: string): Promise<Result<ArtifactBundle>> {
 	try {
 		const artifacts = await listRuntimeArtifacts(rootPath)
@@ -775,6 +862,16 @@ function podmanContainerName(handle: SandboxHandle): Result<string> {
 	}
 
 	return ok(handle.id)
+}
+
+function metadataNetworkMode(handle: SandboxHandle): NetworkMode | undefined {
+	if (!isRecord(handle.metadata)) {
+		return undefined
+	}
+
+	return handle.metadata.network === "none" || handle.metadata.network === "default"
+		? handle.metadata.network
+		: undefined
 }
 
 function combinedLogs(result: PodmanCommandResult): string {

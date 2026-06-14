@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -12,6 +12,7 @@ import {
 	type PodmanCommandOptions,
 	type PodmanCommandResult,
 	type PodmanCommandRunner,
+	type RuntimeResultJson,
 	type SandboxHandle,
 } from "./index.js"
 import { asId, err, sandoError, type Result } from "@sando/shared"
@@ -427,7 +428,10 @@ describe("PodmanRuntime", () => {
 
 	it("runs a command in an existing Podman sandbox", async () => {
 		const runner = fakePodmanRunner([{ exitCode: 2, stdout: "out", stderr: "err" }])
-		const runtime = new PodmanRuntime({ commandRunner: runner.run })
+		const runtime = new PodmanRuntime({
+			commandRunner: runner.run,
+			runsRootPath: await tempRunsRoot(),
+		})
 		const result = await runtime.runCommand(podmanHandle(), {
 			command: "pnpm test",
 			cwd: "/workspace/packages/app",
@@ -470,7 +474,10 @@ describe("PodmanRuntime", () => {
 
 	it("uses the sandbox timeout when running commands", async () => {
 		const runner = fakePodmanRunner([{ exitCode: 0, stdout: "ok", stderr: "" }])
-		const runtime = new PodmanRuntime({ commandRunner: runner.run })
+		const runtime = new PodmanRuntime({
+			commandRunner: runner.run,
+			runsRootPath: await tempRunsRoot(),
+		})
 		const result = await runtime.runCommand(podmanHandle({ timeoutSeconds: 600 }), {
 			command: "pnpm test",
 		})
@@ -496,7 +503,10 @@ describe("PodmanRuntime", () => {
 		const runner = fakePodmanRunner([
 			{ exitCode: null, stdout: "partial", stderr: "", timedOut: true, signal: "SIGTERM" },
 		])
-		const runtime = new PodmanRuntime({ commandRunner: runner.run })
+		const runtime = new PodmanRuntime({
+			commandRunner: runner.run,
+			runsRootPath: await tempRunsRoot(),
+		})
 		const result = await runtime.runCommand(podmanHandle({ timeoutSeconds: 600 }), {
 			command: "sleep 999",
 			timeoutSeconds: 5,
@@ -526,6 +536,63 @@ describe("PodmanRuntime", () => {
 				options: { timeoutMs: 5000 },
 			},
 		])
+	})
+
+	it("writes host result.json and keeps it when artifacts are collected", async () => {
+		const runsRootPath = await tempRunsRoot()
+		const runRootPath = join(runsRootPath, "run_123")
+		const calls: FakePodmanCall[] = []
+		const run: PodmanCommandRunner = async (command, args, options) => {
+			calls.push(callRecord(command, args, options))
+
+			if (args[0] === "cp") {
+				await writeArtifactFiles(runRootPath)
+				return {
+					ok: true,
+					value: { exitCode: 0, stdout: "", stderr: "" },
+				}
+			}
+
+			return {
+				ok: true,
+				value: { exitCode: 2, stdout: "out", stderr: "err" },
+			}
+		}
+		const runtime = new PodmanRuntime({ commandRunner: run, runsRootPath })
+		const handle = podmanHandle({ network: "none" })
+		const result = await runtime.runCommand(handle, {
+			command: "pnpm test",
+		})
+
+		expect(result.ok).toBe(true)
+		await expect(readResultJson(runRootPath)).resolves.toMatchObject({
+			runId: "run_123",
+			runtime: "podman",
+			command: "pnpm test",
+			status: "failed",
+			exitCode: 2,
+			network: "none",
+			artifacts: {
+				logs: "logs.txt",
+				stdout: "stdout.txt",
+				stderr: "stderr.txt",
+				diff: "diff.patch",
+				changedFiles: "changed-files.txt",
+			},
+		})
+
+		const collected = await runtime.collectArtifacts(handle)
+
+		expect(collected.ok).toBe(true)
+		if (collected.ok) {
+			expect(collected.value.resultPath).toBe(join(runRootPath, "result.json"))
+		}
+		await expect(readResultJson(runRootPath)).resolves.toMatchObject({
+			command: "pnpm test",
+			status: "failed",
+			exitCode: 2,
+		})
+		expect(calls.map((call) => call.args[0])).toEqual(["exec", "cp"])
 	})
 
 	it("copies Podman artifacts into the local run directory", async () => {
@@ -684,11 +751,23 @@ async function writeArtifactFiles(rootPath: string): Promise<void> {
 	await writeFile(join(rootPath, "stdout.txt"), "out")
 }
 
+async function readResultJson(rootPath: string): Promise<RuntimeResultJson> {
+	return JSON.parse(await readFile(join(rootPath, "result.json"), "utf8")) as RuntimeResultJson
+}
+
 function podmanHandle(
-	options: { readonly timeoutSeconds?: number; readonly artifactDir?: string } = {},
+	options: {
+		readonly timeoutSeconds?: number
+		readonly artifactDir?: string
+		readonly network?: "none" | "default"
+	} = {},
 ): SandboxHandle {
 	const metadata: Record<string, string | number> = {
 		name: "sandhost-run-run_123",
+	}
+
+	if (options.network !== undefined) {
+		metadata.network = options.network
 	}
 
 	if (options.artifactDir !== undefined) {
