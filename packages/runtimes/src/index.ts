@@ -1,5 +1,7 @@
 import { execFile } from "node:child_process"
 import type { ExecFileOptionsWithStringEncoding } from "node:child_process"
+import { mkdir, readdir, rm, stat } from "node:fs/promises"
+import { join, relative, resolve, sep } from "node:path"
 import { promisify } from "node:util"
 
 import type {
@@ -21,6 +23,7 @@ export const defaultNodeTsPodmanImage = "localhost/sandhost-node-ts:local"
 export const defaultPodmanRunnerPath = "/sandhost/runner/run.sh"
 export const defaultPodmanWorkspacePath = "/workspace"
 export const defaultPodmanArtifactPath = "/artifacts"
+export const defaultPodmanRunsRootPath = ".sandhost/runs"
 
 export type SandboxHandle = {
 	readonly id: string
@@ -149,6 +152,7 @@ export type PodmanRuntimeOptions = {
 	readonly runnerPath?: string
 	readonly workspacePath?: string
 	readonly artifactPath?: string
+	readonly runsRootPath?: string
 }
 
 export class PodmanRuntime implements SandboxRuntime {
@@ -161,6 +165,7 @@ export class PodmanRuntime implements SandboxRuntime {
 	private readonly runnerPath: string
 	private readonly workspacePath: string
 	private readonly artifactPath: string
+	private readonly runsRootPath: string
 
 	constructor(options: PodmanRuntimeOptions = {}) {
 		this.command = options.podmanExecutable ?? defaultPodmanExecutable
@@ -170,6 +175,7 @@ export class PodmanRuntime implements SandboxRuntime {
 		this.runnerPath = options.runnerPath ?? defaultPodmanRunnerPath
 		this.workspacePath = options.workspacePath ?? defaultPodmanWorkspacePath
 		this.artifactPath = options.artifactPath ?? defaultPodmanArtifactPath
+		this.runsRootPath = resolve(options.runsRootPath ?? defaultPodmanRunsRootPath)
 	}
 
 	async createSandbox(input: CreateSandboxInput): Promise<Result<SandboxHandle>> {
@@ -288,8 +294,41 @@ export class PodmanRuntime implements SandboxRuntime {
 		})
 	}
 
-	async collectArtifacts(_handle: SandboxHandle): Promise<Result<ArtifactBundle>> {
-		return notImplemented("Podman artifact collection is not implemented yet.")
+	async collectArtifacts(handle: SandboxHandle): Promise<Result<ArtifactBundle>> {
+		const container = podmanContainerName(handle)
+
+		if (!container.ok) {
+			return container
+		}
+
+		const rootPath = runArtifactsPath(this.runsRootPath, handle.runId)
+		const prepared = await prepareRunArtifactsRoot(rootPath)
+
+		if (!prepared.ok) {
+			return prepared
+		}
+
+		const args = [
+			"cp",
+			podmanArtifactCopySource(container.value, podmanArtifactDir(handle, this.artifactPath)),
+			rootPath,
+		]
+		const result = await this.runner(this.command, args)
+
+		if (!result.ok) {
+			return result
+		}
+
+		if (result.value.exitCode !== 0) {
+			return podmanImageFailure(
+				"Could not copy Podman artifacts.",
+				this.command,
+				args,
+				result.value,
+			)
+		}
+
+		return artifactBundle(rootPath)
 	}
 
 	async destroySandbox(handle: SandboxHandle): Promise<Result<void>> {
@@ -569,6 +608,120 @@ function podmanWorkdirArgs(workdir: string | undefined): readonly string[] {
 	return workdir === undefined ? [] : ["--workdir", workdir]
 }
 
+function podmanArtifactDir(handle: SandboxHandle, fallback: string): string {
+	if (isRecord(handle.metadata) && typeof handle.metadata.artifactDir === "string") {
+		return handle.metadata.artifactDir
+	}
+
+	return fallback
+}
+
+function podmanArtifactCopySource(container: string, artifactDir: string): string {
+	return `${container}:${artifactDir.replace(/\/+$/, "")}/.`
+}
+
+function runArtifactsPath(runsRootPath: string, runId: RunId): string {
+	return join(runsRootPath, String(runId))
+}
+
+async function prepareRunArtifactsRoot(rootPath: string): Promise<Result<void>> {
+	try {
+		await rm(rootPath, { force: true, recursive: true })
+		await mkdir(rootPath, { recursive: true })
+		return ok(undefined)
+	} catch (error) {
+		return fileSystemFailure("Could not prepare run artifact directory.", error, {
+			rootPath,
+		})
+	}
+}
+
+async function artifactBundle(rootPath: string): Promise<Result<ArtifactBundle>> {
+	try {
+		const artifacts = await listRuntimeArtifacts(rootPath)
+		const bundle: {
+			rootPath: string
+			artifacts: RuntimeArtifact[]
+			resultPath?: string
+			logsPath?: string
+			diffPath?: string
+			changedFilesPath?: string
+		} = {
+			rootPath,
+			artifacts,
+		}
+
+		for (const artifact of artifacts) {
+			switch (artifact.name) {
+				case "result.json":
+					bundle.resultPath = artifact.path
+					break
+				case "logs.txt":
+					bundle.logsPath = artifact.path
+					break
+				case "diff.patch":
+					bundle.diffPath = artifact.path
+					break
+				case "changed-files.txt":
+					bundle.changedFilesPath = artifact.path
+					break
+			}
+		}
+
+		return ok(bundle)
+	} catch (error) {
+		return fileSystemFailure("Could not read copied artifact directory.", error, {
+			rootPath,
+		})
+	}
+}
+
+async function listRuntimeArtifacts(
+	rootPath: string,
+	currentPath: string = rootPath,
+): Promise<RuntimeArtifact[]> {
+	const entries = await readdir(currentPath, { withFileTypes: true })
+	const artifacts: RuntimeArtifact[] = []
+
+	for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+		const path = join(currentPath, entry.name)
+
+		if (entry.isDirectory()) {
+			artifacts.push(...(await listRuntimeArtifacts(rootPath, path)))
+			continue
+		}
+
+		if (!entry.isFile()) {
+			continue
+		}
+
+		const file = await stat(path)
+		const name = relative(rootPath, path).split(sep).join("/")
+		const contentType = artifactContentType(name)
+
+		artifacts.push({
+			name,
+			path,
+			sizeBytes: file.size,
+			...(contentType === undefined ? {} : { contentType }),
+		})
+	}
+
+	return artifacts
+}
+
+function artifactContentType(name: string): string | undefined {
+	if (name.endsWith(".json")) {
+		return "application/json"
+	}
+
+	if (name.endsWith(".patch") || name.endsWith(".txt")) {
+		return "text/plain"
+	}
+
+	return undefined
+}
+
 function podmanCommandTimeoutSeconds(
 	handle: SandboxHandle,
 	command: CommandSpec,
@@ -637,6 +790,24 @@ function notImplemented<Value>(message: string): Result<Value> {
 	)
 }
 
+function fileSystemFailure(
+	message: string,
+	error: unknown,
+	details: Record<string, JsonValue>,
+): Result<never> {
+	return err(
+		sandoError({
+			code: "INTERNAL",
+			message,
+			details: {
+				...details,
+				errorCode: isNodeError(error) && error.code !== undefined ? error.code : "UNKNOWN",
+				errorMessage: error instanceof Error ? error.message : String(error),
+			},
+		}),
+	)
+}
+
 function podmanImageFailure(
 	message: string,
 	command: string,
@@ -687,6 +858,10 @@ function commandFailureDetails(
 
 function isRecord(value: unknown): value is Record<string, JsonValue> {
 	return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+	return error instanceof Error && "code" in error
 }
 
 type ExecFileError = Error & {

@@ -1,4 +1,8 @@
-import { describe, expect, it } from "vitest"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+
+import { afterEach, describe, expect, it } from "vitest"
 
 import {
 	defaultNodeTsPodmanImage,
@@ -11,6 +15,12 @@ import {
 	type SandboxHandle,
 } from "./index.js"
 import { asId, err, sandoError, type Result } from "@sando/shared"
+
+const tempRoots: string[] = []
+
+afterEach(async () => {
+	await Promise.all(tempRoots.splice(0).map((path) => rm(path, { force: true, recursive: true })))
+})
 
 describe("ensurePodmanImage", () => {
 	it("returns an existing image without building or pulling", async () => {
@@ -518,6 +528,93 @@ describe("PodmanRuntime", () => {
 		])
 	})
 
+	it("copies Podman artifacts into the local run directory", async () => {
+		const runsRootPath = await tempRunsRoot()
+		const runRootPath = join(runsRootPath, "run_123")
+		const calls: FakePodmanCall[] = []
+		const run: PodmanCommandRunner = async (command, args, options) => {
+			calls.push(callRecord(command, args, options))
+			await writeArtifactFiles(runRootPath)
+			return {
+				ok: true,
+				value: { exitCode: 0, stdout: "", stderr: "" },
+			}
+		}
+		const runtime = new PodmanRuntime({ commandRunner: run, runsRootPath })
+
+		await mkdir(runRootPath, { recursive: true })
+		await writeFile(join(runRootPath, "stale.txt"), "old")
+
+		const result = await runtime.collectArtifacts(podmanHandle())
+
+		expect(result.ok).toBe(true)
+		if (result.ok) {
+			expect(result.value).toMatchObject({
+				rootPath: runRootPath,
+				resultPath: join(runRootPath, "result.json"),
+				logsPath: join(runRootPath, "logs.txt"),
+				diffPath: join(runRootPath, "diff.patch"),
+				changedFilesPath: join(runRootPath, "changed-files.txt"),
+			})
+			expect(result.value.artifacts.map((artifact) => artifact.name)).toEqual([
+				"changed-files.txt",
+				"coverage/report.txt",
+				"diff.patch",
+				"logs.txt",
+				"result.json",
+				"stderr.txt",
+				"stdout.txt",
+			])
+			expect(result.value.artifacts).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						name: "logs.txt",
+						path: join(runRootPath, "logs.txt"),
+						contentType: "text/plain",
+						sizeBytes: 4,
+					}),
+					expect.objectContaining({
+						name: "result.json",
+						path: join(runRootPath, "result.json"),
+						contentType: "application/json",
+					}),
+					expect.objectContaining({
+						name: "coverage/report.txt",
+						path: join(runRootPath, "coverage", "report.txt"),
+						contentType: "text/plain",
+					}),
+				]),
+			)
+		}
+		expect(calls).toEqual([
+			{
+				command: "podman",
+				args: ["cp", "sandhost-run-run_123:/artifacts/.", runRootPath],
+			},
+		])
+	})
+
+	it("returns a sandbox failure when artifact copy fails", async () => {
+		const runsRootPath = await tempRunsRoot()
+		const runRootPath = join(runsRootPath, "run_123")
+		const runner = fakePodmanRunner([{ exitCode: 125, stdout: "", stderr: "copy failed" }])
+		const runtime = new PodmanRuntime({ commandRunner: runner.run, runsRootPath })
+		const result = await runtime.collectArtifacts(
+			podmanHandle({ artifactDir: "/custom-artifacts" }),
+		)
+
+		expect(result.ok).toBe(false)
+		if (!result.ok) {
+			expect(result.error.code).toBe("SANDBOX_FAILED")
+			expect(result.error.details).toEqual({
+				command: "podman",
+				args: ["cp", "sandhost-run-run_123:/custom-artifacts/.", runRootPath],
+				exitCode: 125,
+				stderr: "copy failed",
+			})
+		}
+	})
+
 	it("destroys a Podman sandbox", async () => {
 		const runner = fakePodmanRunner([{ exitCode: 0, stdout: "", stderr: "" }])
 		const runtime = new PodmanRuntime({ commandRunner: runner.run })
@@ -570,9 +667,32 @@ function fakePodmanRunner(results: Array<PodmanCommandResult | Result<PodmanComm
 	}
 }
 
-function podmanHandle(options: { readonly timeoutSeconds?: number } = {}): SandboxHandle {
+async function tempRunsRoot(): Promise<string> {
+	const root = await mkdtemp(join(tmpdir(), "sando-runtimes-"))
+	tempRoots.push(root)
+	return join(root, ".sandhost", "runs")
+}
+
+async function writeArtifactFiles(rootPath: string): Promise<void> {
+	await mkdir(join(rootPath, "coverage"), { recursive: true })
+	await writeFile(join(rootPath, "changed-files.txt"), " M src/index.ts\n")
+	await writeFile(join(rootPath, "coverage", "report.txt"), "coverage")
+	await writeFile(join(rootPath, "diff.patch"), "diff")
+	await writeFile(join(rootPath, "logs.txt"), "logs")
+	await writeFile(join(rootPath, "result.json"), "{}")
+	await writeFile(join(rootPath, "stderr.txt"), "err")
+	await writeFile(join(rootPath, "stdout.txt"), "out")
+}
+
+function podmanHandle(
+	options: { readonly timeoutSeconds?: number; readonly artifactDir?: string } = {},
+): SandboxHandle {
 	const metadata: Record<string, string | number> = {
 		name: "sandhost-run-run_123",
+	}
+
+	if (options.artifactDir !== undefined) {
+		metadata.artifactDir = options.artifactDir
 	}
 
 	if (options.timeoutSeconds !== undefined) {

@@ -23,7 +23,7 @@
 -[x] Capture stdout/stderr/logs
 -[x] Generate baseline git commit inside sandbox
 -[x] Generate diff.patch and changed-files.txt
--[ ] Copy artifacts to .sandhost/runs/<runId>
+-[x] Copy artifacts to .sandhost/runs/<runId>
 -[ ] Write result.json
 -[ ] Add cleanup-on-error/finally handling
 -[ ] Add integration fixture repo
