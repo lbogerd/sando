@@ -84,6 +84,31 @@ describe("node-ts sandbox runner script", () => {
 		await expect(readFile(join(artifacts, "pwd.txt"), "utf8")).resolves.toBe(`${workspace}\n`)
 	})
 
+	it("captures argv command stdout, stderr, and logs", async () => {
+		const { artifacts, workspace } = await tempSandboxDirs()
+
+		await expect(
+			execFileAsync(
+				nodeTsRunnerScriptPath,
+				["bash", "-lc", 'printf "out\\n"; printf "err\\n" >&2; exit 7'],
+				{
+					env: sandboxEnv(workspace, artifacts),
+				},
+			),
+		).rejects.toMatchObject({
+			code: 7,
+			stdout: "out\n",
+			stderr: "err\n",
+		})
+
+		await expect(readFile(join(artifacts, "stdout.txt"), "utf8")).resolves.toBe("out\n")
+		await expect(readFile(join(artifacts, "stderr.txt"), "utf8")).resolves.toBe("err\n")
+
+		const logs = await readFile(join(artifacts, "logs.txt"), "utf8")
+		expect(logs).toContain("out\n")
+		expect(logs).toContain("err\n")
+	})
+
 	it("runs SANDHOST_COMMAND when no argv command is provided", async () => {
 		const { artifacts, workspace } = await tempSandboxDirs()
 
@@ -97,6 +122,26 @@ describe("node-ts sandbox runner script", () => {
 		await expect(readFile(join(artifacts, "result.txt"), "utf8")).resolves.toBe("ok")
 	})
 
+	it("captures SANDHOST_COMMAND stdout, stderr, and logs", async () => {
+		const { artifacts, workspace } = await tempSandboxDirs()
+
+		const result = await execFileAsync(nodeTsRunnerScriptPath, [], {
+			env: {
+				...sandboxEnv(workspace, artifacts),
+				SANDHOST_COMMAND: 'printf "cmd-out\\n"; printf "cmd-err\\n" >&2',
+			},
+		})
+
+		expect(result.stdout).toBe("cmd-out\n")
+		expect(result.stderr).toBe("cmd-err\n")
+		await expect(readFile(join(artifacts, "stdout.txt"), "utf8")).resolves.toBe("cmd-out\n")
+		await expect(readFile(join(artifacts, "stderr.txt"), "utf8")).resolves.toBe("cmd-err\n")
+
+		const logs = await readFile(join(artifacts, "logs.txt"), "utf8")
+		expect(logs).toContain("cmd-out\n")
+		expect(logs).toContain("cmd-err\n")
+	})
+
 	it("fails with usage when no command is provided", async () => {
 		const { artifacts, workspace } = await tempSandboxDirs()
 
@@ -108,6 +153,12 @@ describe("node-ts sandbox runner script", () => {
 			code: 64,
 			stderr: expect.stringContaining("usage:"),
 		})
+		await expect(readFile(join(artifacts, "stderr.txt"), "utf8")).resolves.toEqual(
+			expect.stringContaining("usage:"),
+		)
+		await expect(readFile(join(artifacts, "logs.txt"), "utf8")).resolves.toEqual(
+			expect.stringContaining("usage:"),
+		)
 	})
 })
 

@@ -20,7 +20,7 @@
 -[x] Implement network modes: none/default
 -[x] Implement CPU/memory flags
 -[x] Implement timeout handling
--[ ] Capture stdout/stderr/logs
+-[x] Capture stdout/stderr/logs
 -[ ] Generate baseline git commit inside sandbox
 -[ ] Generate diff.patch and changed-files.txt
 -[ ] Copy artifacts to .sandhost/runs/<runId>
