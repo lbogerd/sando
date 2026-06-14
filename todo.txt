@@ -1,0 +1,8 @@
+[x] Create pnpm monorepo
+[x] Add shared TypeScript config, eslint/biome, vitest
+[x] Add package skeletons
+[ ] Define shared ID/result/error types
+[ ] Define policy schema
+[ ] Define SandboxRuntime interface
+[ ] Define RunProjectCommand input/result schema
+[ ] Add dev docs: architecture.md, local-dev.md
