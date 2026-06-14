@@ -7,6 +7,8 @@ import {
 	hostPlatforms,
 	isCreateRunInput,
 	isCreateRunResult,
+	isFinishRunInput,
+	isFinishRunResult,
 	isHostRecord,
 	isIdOfKind,
 	isProjectRecord,
@@ -21,6 +23,8 @@ import {
 	ok,
 	parseCreateRunInput,
 	parseCreateRunResult,
+	parseFinishRunInput,
+	parseFinishRunResult,
 	parseHostRecord,
 	parseHostRegistrationResult,
 	parseProjectRecord,
@@ -466,6 +470,57 @@ describe("run metadata schemas", () => {
 					{ path: "$.runtime", message: "Expected a supported sandbox runtime." },
 					{ path: "$.network", message: "Expected a supported network mode." },
 					{ path: "$.status", message: "Expected a supported run status." },
+					{ path: "$.exitCode", message: "Expected null or a non-negative integer." },
+					{ path: "$.durationMs", message: "Expected a non-negative integer." },
+				],
+			})
+		}
+	})
+
+	it("accepts valid finish run input and result payloads", () => {
+		const input = {
+			status: "failed",
+			exitCode: 1,
+			durationMs: 42100,
+		}
+		const result = {
+			run: {
+				id: "run_123",
+				userId: "user_123",
+				projectId: "proj_123",
+				hostId: "host_123",
+				agentId: "agent_123",
+				grantId: "grant_123",
+				command: "pnpm test",
+				template: "node-ts",
+				runtime: "podman",
+				network: "none",
+				status: "failed",
+				exitCode: 1,
+				finishedAt: "2026-06-14T18:00:00.000Z",
+				durationMs: 42100,
+			},
+		}
+
+		expect(parseFinishRunInput(input)).toEqual({ ok: true, value: input })
+		expect(isFinishRunInput(input)).toBe(true)
+		expect(parseFinishRunResult(result)).toEqual({ ok: true, value: result })
+		expect(isFinishRunResult(result)).toBe(true)
+	})
+
+	it("rejects invalid finish run input", () => {
+		const result = parseFinishRunInput({
+			status: "queued",
+			exitCode: -1,
+			durationMs: -1,
+		})
+
+		expect(result.ok).toBe(false)
+		if (!result.ok) {
+			expect(result.error.code).toBe("VALIDATION_FAILED")
+			expect(result.error.details).toEqual({
+				issues: [
+					{ path: "$.status", message: "Expected a terminal run status." },
 					{ path: "$.exitCode", message: "Expected null or a non-negative integer." },
 					{ path: "$.durationMs", message: "Expected a non-negative integer." },
 				],

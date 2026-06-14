@@ -99,6 +99,7 @@ export function createHostedApp(options: HostedAppOptions = {}): Hono {
 		"/",
 		createRunRoutes({
 			currentUser,
+			now,
 			runRepository,
 		}),
 	)

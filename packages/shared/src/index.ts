@@ -529,6 +529,20 @@ export const createRunResultSchema = z.object({
 
 export type CreateRunResult = z.infer<typeof createRunResultSchema>
 
+export const finishRunInputSchema = z.object({
+	status: runProjectCommandStatusSchema,
+	exitCode: nullableExitCodeSchema,
+	durationMs: nonNegativeIntegerSchema,
+})
+
+export type FinishRunInput = z.infer<typeof finishRunInputSchema>
+
+export const finishRunResultSchema = z.object({
+	run: runRecordSchema,
+})
+
+export type FinishRunResult = z.infer<typeof finishRunResultSchema>
+
 export function parseRunRecord(value: unknown): Result<RunRecord> {
 	const result = runRecordSchema.safeParse(value)
 
@@ -569,6 +583,34 @@ export function parseCreateRunResult(value: unknown): Result<CreateRunResult> {
 
 export function isCreateRunResult(value: unknown): value is CreateRunResult {
 	return parseCreateRunResult(value).ok
+}
+
+export function parseFinishRunInput(value: unknown): Result<FinishRunInput> {
+	const result = finishRunInputSchema.safeParse(value)
+
+	if (!result.success) {
+		return err(validationError("Invalid finish run input.", result.error))
+	}
+
+	return ok(result.data)
+}
+
+export function isFinishRunInput(value: unknown): value is FinishRunInput {
+	return parseFinishRunInput(value).ok
+}
+
+export function parseFinishRunResult(value: unknown): Result<FinishRunResult> {
+	const result = finishRunResultSchema.safeParse(value)
+
+	if (!result.success) {
+		return err(validationError("Invalid finish run result.", result.error))
+	}
+
+	return ok(result.data)
+}
+
+export function isFinishRunResult(value: unknown): value is FinishRunResult {
+	return parseFinishRunResult(value).ok
 }
 
 function validationError(message: string, error: z.ZodError): SandoError {
