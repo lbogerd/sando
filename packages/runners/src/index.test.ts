@@ -1,6 +1,8 @@
+import { execFile } from "node:child_process"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
+import { promisify } from "node:util"
 
 import { afterEach, describe, expect, it } from "vitest"
 
@@ -11,9 +13,11 @@ import {
 	findProjectRoot,
 	loadProjectPolicy,
 	projectPolicyFilePath,
+	selectArchiveFiles,
 } from "./index.js"
 
 const tempRoots: string[] = []
+const execFileAsync = promisify(execFile)
 
 afterEach(async () => {
 	await Promise.all(tempRoots.splice(0).map((path) => rm(path, { force: true, recursive: true })))
@@ -376,6 +380,66 @@ describe("compileEffectivePolicy", () => {
 	})
 })
 
+describe("selectArchiveFiles", () => {
+	it("selects tracked and untracked files using git exclusions", async () => {
+		const root = await tempProject()
+		await initGitProject(root)
+		await mkdir(join(root, "src"), { recursive: true })
+		await mkdir(join(root, "ignored-dir"), { recursive: true })
+		await writeFile(join(root, ".gitignore"), "*.log\nignored-dir/\n")
+		await writeFile(join(root, "src", "tracked.ts"), "export const tracked = true\n")
+		await writeFile(join(root, "src", "untracked file.ts"), "export const untracked = true\n")
+		await writeFile(join(root, "debug.log"), "ignored\n")
+		await writeFile(join(root, "ignored-dir", "generated.txt"), "ignored\n")
+		await runGit(root, ["add", ".gitignore", "src/tracked.ts"])
+
+		const result = await selectArchiveFiles({ projectRoot: root })
+
+		expect(result.ok).toBe(true)
+		if (result.ok) {
+			expect(result.value).toEqual({
+				projectRoot: root,
+				files: [".gitignore", "src/tracked.ts", "src/untracked file.ts"],
+			})
+		}
+	})
+
+	it("detects the project root from a nested start path", async () => {
+		const root = await tempProject()
+		const nested = join(root, "packages", "app")
+
+		await initGitProject(root)
+		await mkdir(nested, { recursive: true })
+		await writeFile(join(root, "README.md"), "# test\n")
+		await runGit(root, ["add", "README.md"])
+
+		const result = await selectArchiveFiles({ startPath: nested })
+
+		expect(result.ok).toBe(true)
+		if (result.ok) {
+			expect(result.value.projectRoot).toBe(root)
+			expect(result.value.files).toEqual(["README.md"])
+		}
+	})
+
+	it("returns a command failure when git cannot list files", async () => {
+		const root = await tempProject()
+		const result = await selectArchiveFiles({ projectRoot: root })
+
+		expect(result.ok).toBe(false)
+		if (!result.ok) {
+			expect(result.error.code).toBe("COMMAND_FAILED")
+			expect(result.error.details).toEqual({
+				command: "git ls-files -z -c -o --exclude-standard",
+				cwd: root,
+				exitCode: 128,
+				errorCode: null,
+				stderr: expect.stringContaining("not a git repository"),
+			})
+		}
+	})
+})
+
 async function tempProject(): Promise<string> {
 	const root = await mkdtemp(join(tmpdir(), "sando-runners-"))
 	tempRoots.push(root)
@@ -385,4 +449,12 @@ async function tempProject(): Promise<string> {
 async function writePolicy(root: string, policy: unknown): Promise<void> {
 	await mkdir(join(root, ".sandhost"), { recursive: true })
 	await writeFile(join(root, projectPolicyFilePath), JSON.stringify(policy, null, 2))
+}
+
+async function initGitProject(root: string): Promise<void> {
+	await runGit(root, ["init"])
+}
+
+async function runGit(cwd: string, args: readonly string[]): Promise<void> {
+	await execFileAsync("git", [...args], { cwd })
 }

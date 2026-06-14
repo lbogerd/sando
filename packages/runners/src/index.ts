@@ -1,5 +1,7 @@
+import { execFile } from "node:child_process"
 import { lstat, readFile } from "node:fs/promises"
 import { dirname, isAbsolute, join, parse as parsePath, resolve } from "node:path"
+import { promisify } from "node:util"
 
 import {
 	defaultSandoPolicy,
@@ -20,6 +22,15 @@ import {
 export const packageName = "runners"
 
 export const projectPolicyFilePath = ".sandhost/policy.json"
+export const gitArchiveFileSelectionArgs = [
+	"ls-files",
+	"-z",
+	"-c",
+	"-o",
+	"--exclude-standard",
+] as const
+
+const execFileAsync = promisify(execFile)
 
 export const projectRootStrongMarkers = [
 	projectPolicyFilePath,
@@ -51,6 +62,17 @@ export type LoadedProjectPolicy = {
 export type LoadProjectPolicyInput = {
 	readonly startPath?: string
 	readonly projectRoot?: string
+}
+
+export type ArchiveFileSelectionInput = {
+	readonly startPath?: string
+	readonly projectRoot?: string
+	readonly gitExecutable?: string
+}
+
+export type ArchiveFileSelection = {
+	readonly projectRoot: string
+	readonly files: readonly string[]
 }
 
 export type PolicyConstraints = {
@@ -311,6 +333,56 @@ export function compileEffectivePolicy(
 	})
 }
 
+export async function selectArchiveFiles(
+	input: ArchiveFileSelectionInput = {},
+): Promise<Result<ArchiveFileSelection>> {
+	const projectRoot = await resolveProjectRootPath(input)
+
+	if (!projectRoot.ok) {
+		return projectRoot
+	}
+
+	const gitExecutable = input.gitExecutable ?? "git"
+
+	try {
+		const { stdout } = await execFileAsync(gitExecutable, [...gitArchiveFileSelectionArgs], {
+			cwd: projectRoot.value,
+			encoding: "utf8",
+			maxBuffer: 128 * 1024 * 1024,
+		})
+
+		return ok({
+			projectRoot: projectRoot.value,
+			files: parseGitNullDelimitedPaths(stdout),
+		})
+	} catch (error) {
+		if (!isExecFileError(error)) {
+			throw error
+		}
+
+		return err(
+			sandoError({
+				code: "COMMAND_FAILED",
+				message: "Could not select archive files with git.",
+				details: {
+					command: `${gitExecutable} ${gitArchiveFileSelectionArgs.join(" ")}`,
+					cwd: projectRoot.value,
+					exitCode: typeof error.code === "number" ? error.code : null,
+					errorCode: typeof error.code === "string" ? error.code : null,
+					stderr: execOutputToString(error.stderr),
+				},
+			}),
+		)
+	}
+}
+
+function parseGitNullDelimitedPaths(output: string): readonly string[] {
+	return output
+		.split("\0")
+		.filter((path) => path.length > 0)
+		.sort()
+}
+
 function policyLayers(input: CompileEffectivePolicyInput): readonly PolicyConstraints[] {
 	return [
 		input.systemPolicy ?? defaultSystemPolicyConstraints,
@@ -452,6 +524,13 @@ function jsonScalar(value: unknown): string | number | boolean | null {
 }
 
 async function resolvePolicyProjectRoot(input: LoadProjectPolicyInput): Promise<Result<string>> {
+	return resolveProjectRootPath(input)
+}
+
+async function resolveProjectRootPath(input: {
+	readonly startPath?: string
+	readonly projectRoot?: string
+}): Promise<Result<string>> {
 	if (input.projectRoot !== undefined) {
 		return ok(resolve(input.projectRoot))
 	}
@@ -464,7 +543,6 @@ async function resolvePolicyProjectRoot(input: LoadProjectPolicyInput): Promise<
 	if (!projectRoot.ok) {
 		return err(projectRoot.error)
 	}
-
 	return ok(projectRoot.value.path)
 }
 
@@ -602,4 +680,21 @@ function* ancestorDirectories(startDirectory: string): Generator<string> {
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
 	return error instanceof Error && "code" in error
+}
+
+type ExecFileError = NodeJS.ErrnoException & {
+	readonly stdout?: string | Buffer
+	readonly stderr?: string | Buffer
+}
+
+function isExecFileError(error: unknown): error is ExecFileError {
+	return error instanceof Error && ("code" in error || "stderr" in error)
+}
+
+function execOutputToString(output: string | Buffer | undefined): string {
+	if (output === undefined) {
+		return ""
+	}
+
+	return Buffer.isBuffer(output) ? output.toString("utf8") : output
 }
