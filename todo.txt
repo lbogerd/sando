@@ -29,7 +29,7 @@
 -[x] Add integration fixture repo
 -[x] Add WSL/Podman diagnostics spike
 [ ] Phase 2 - Hosted control plane metadata
--[ ] Create hosted app | use Hono
+-[x] Create hosted app | use Hono
 -[ ] Add database schema
 -[ ] Add Better Auth user login | make sure to update schema with better auth tables
 -[ ] Add Project table

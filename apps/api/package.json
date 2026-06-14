@@ -7,6 +7,8 @@
 		"typecheck": "tsc -p tsconfig.json --noEmit"
 	},
 	"dependencies": {
-		"@sando/shared": "workspace:*"
+		"@hono/node-server": "^2.0.4",
+		"@sando/shared": "workspace:*",
+		"hono": "^4.12.25"
 	}
 }
