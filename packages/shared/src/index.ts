@@ -343,6 +343,56 @@ export const artifactRefSchema = z.object({
 
 export type ArtifactRef = z.infer<typeof artifactRefSchema>
 
+export const artifactRecordSchema = z.object({
+	id: idSchema("artifact", "Expected an artifact ID."),
+	runId: idSchema("run", "Expected a run ID."),
+	projectId: idSchema("project", "Expected a project ID."),
+	name: nonEmptyStringSchema,
+	path: nonEmptyStringSchema,
+	contentType: nonEmptyStringSchema.optional(),
+	sizeBytes: nonNegativeIntegerSchema.optional(),
+	uploadThingKey: nonEmptyStringSchema,
+	private: z.literal(true, "Expected a private artifact."),
+	createdAt: nonEmptyStringSchema,
+	retentionExpiresAt: nonEmptyStringSchema.optional(),
+})
+
+export type ArtifactRecord = z.infer<typeof artifactRecordSchema>
+
+export const listRunArtifactsResultSchema = z.object({
+	artifacts: z.array(artifactRecordSchema),
+})
+
+export type ListRunArtifactsResult = z.infer<typeof listRunArtifactsResultSchema>
+
+export function parseArtifactRecord(value: unknown): Result<ArtifactRecord> {
+	const result = artifactRecordSchema.safeParse(value)
+
+	if (!result.success) {
+		return err(validationError("Invalid artifact record.", result.error))
+	}
+
+	return ok(result.data)
+}
+
+export function isArtifactRecord(value: unknown): value is ArtifactRecord {
+	return parseArtifactRecord(value).ok
+}
+
+export function parseListRunArtifactsResult(value: unknown): Result<ListRunArtifactsResult> {
+	const result = listRunArtifactsResultSchema.safeParse(value)
+
+	if (!result.success) {
+		return err(validationError("Invalid list run artifacts result.", result.error))
+	}
+
+	return ok(result.data)
+}
+
+export function isListRunArtifactsResult(value: unknown): value is ListRunArtifactsResult {
+	return parseListRunArtifactsResult(value).ok
+}
+
 export const runProjectCommandResultSchema = z.object({
 	runId: idSchema("run", "Expected a run ID."),
 	status: runProjectCommandStatusSchema,

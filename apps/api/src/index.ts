@@ -10,6 +10,11 @@ import {
 	createMemoryAuditEventRepository,
 	type AuditEventRepository,
 } from "./audit-events.js"
+import {
+	createArtifactRoutes,
+	createMemoryArtifactRepository,
+	type ArtifactRepository,
+} from "./artifacts.js"
 import type { CurrentUserResolver } from "./current-user.js"
 import { createHostRoutes, createMemoryHostRepository, type HostRepository } from "./hosts.js"
 import {
@@ -26,6 +31,7 @@ export type HostedAppOptions = {
 	readonly auth?: Pick<SandhostAuth, "handler">
 	readonly now?: () => Date
 	readonly auditEventRepository?: AuditEventRepository
+	readonly artifactRepository?: ArtifactRepository
 	readonly currentUser?: CurrentUserResolver
 	readonly hostRepository?: HostRepository
 	readonly projectRepository?: ProjectRepository
@@ -40,6 +46,7 @@ export type HostedServerOptions = HostedAppOptions & {
 export function createHostedApp(options: HostedAppOptions = {}): Hono {
 	const now = options.now ?? (() => new Date())
 	const auditEventRepository = options.auditEventRepository ?? createMemoryAuditEventRepository()
+	const artifactRepository = options.artifactRepository ?? createMemoryArtifactRepository()
 	const currentUser = options.currentUser ?? (() => null)
 	const hostRepository = options.hostRepository ?? createMemoryHostRepository()
 	const projectRepository = options.projectRepository ?? createMemoryProjectRepository()
@@ -118,6 +125,13 @@ export function createHostedApp(options: HostedAppOptions = {}): Hono {
 			now,
 		}),
 	)
+	v1.route(
+		"/",
+		createArtifactRoutes({
+			artifactRepository,
+			currentUser,
+		}),
+	)
 
 	app.route(`/${apiVersion}`, v1)
 
@@ -161,6 +175,9 @@ export function serveHostedApp(options: HostedServerOptions = {}): ServerType {
 		...(options.auditEventRepository === undefined
 			? {}
 			: { auditEventRepository: options.auditEventRepository }),
+		...(options.artifactRepository === undefined
+			? {}
+			: { artifactRepository: options.artifactRepository }),
 		...(options.currentUser === undefined ? {} : { currentUser: options.currentUser }),
 		...(options.hostRepository === undefined ? {} : { hostRepository: options.hostRepository }),
 		...(options.projectRepository === undefined

@@ -8,6 +8,7 @@ import {
 	isAppendAuditEventInput,
 	isAppendAuditEventResult,
 	isAuditEventRecord,
+	isArtifactRecord,
 	hostPlatforms,
 	isCreateRunInput,
 	isCreateRunResult,
@@ -22,12 +23,14 @@ import {
 	isRegisterProjectInput,
 	isRunProjectCommandInput,
 	isRunProjectCommandResult,
+	isListRunArtifactsResult,
 	isRunRecord,
 	isSandoPolicy,
 	ok,
 	parseAppendAuditEventInput,
 	parseAppendAuditEventResult,
 	parseAuditEventRecord,
+	parseArtifactRecord,
 	parseCreateRunInput,
 	parseCreateRunResult,
 	parseFinishRunInput,
@@ -40,6 +43,7 @@ import {
 	parseRegisterProjectInput,
 	parseRunProjectCommandInput,
 	parseRunProjectCommandResult,
+	parseListRunArtifactsResult,
 	parseRunRecord,
 	parseSandoPolicy,
 	runStatuses,
@@ -209,6 +213,66 @@ describe("run project command schemas", () => {
 					{ path: "$.logsRef", message: "Expected a sandhost URI." },
 					{ path: "$.artifacts[0].name", message: "Expected a non-empty string." },
 					{ path: "$.artifacts[0].uri", message: "Expected a sandhost URI." },
+				],
+			})
+		}
+	})
+})
+
+describe("artifact metadata schemas", () => {
+	it("accepts valid artifact records and list results", () => {
+		const artifact = {
+			id: "art_123",
+			runId: "run_123",
+			projectId: "proj_123",
+			name: "changed-files.txt",
+			path: "/artifacts/changed-files.txt",
+			contentType: "text/plain",
+			sizeBytes: 128,
+			uploadThingKey: "ut_123",
+			private: true,
+			createdAt: "2026-06-14T18:00:00.000Z",
+			retentionExpiresAt: "2026-07-14T18:00:00.000Z",
+		}
+		const result = { artifacts: [artifact] }
+
+		expect(parseArtifactRecord(artifact)).toEqual({ ok: true, value: artifact })
+		expect(isArtifactRecord(artifact)).toBe(true)
+		expect(parseListRunArtifactsResult(result)).toEqual({ ok: true, value: result })
+		expect(isListRunArtifactsResult(result)).toBe(true)
+	})
+
+	it("rejects invalid artifact records", () => {
+		const result = parseArtifactRecord({
+			id: "run_123",
+			runId: "proj_123",
+			projectId: "host_123",
+			name: "",
+			path: "",
+			contentType: "",
+			sizeBytes: -1,
+			uploadThingKey: "",
+			private: false,
+			createdAt: "",
+			retentionExpiresAt: "",
+		})
+
+		expect(result.ok).toBe(false)
+		if (!result.ok) {
+			expect(result.error.code).toBe("VALIDATION_FAILED")
+			expect(result.error.details).toEqual({
+				issues: [
+					{ path: "$.id", message: "Expected an artifact ID." },
+					{ path: "$.runId", message: "Expected a run ID." },
+					{ path: "$.projectId", message: "Expected a project ID." },
+					{ path: "$.name", message: "Expected a non-empty string." },
+					{ path: "$.path", message: "Expected a non-empty string." },
+					{ path: "$.contentType", message: "Expected a non-empty string." },
+					{ path: "$.sizeBytes", message: "Expected a non-negative integer." },
+					{ path: "$.uploadThingKey", message: "Expected a non-empty string." },
+					{ path: "$.private", message: "Expected a private artifact." },
+					{ path: "$.createdAt", message: "Expected a non-empty string." },
+					{ path: "$.retentionExpiresAt", message: "Expected a non-empty string." },
 				],
 			})
 		}
