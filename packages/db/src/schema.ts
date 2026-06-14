@@ -2,6 +2,7 @@ import type { InferInsertModel, InferSelectModel } from "drizzle-orm"
 import {
 	boolean,
 	index,
+	integer,
 	jsonb,
 	pgSchema,
 	text,
@@ -267,3 +268,41 @@ export const grant = sandhostSchema.table(
 
 export type Grant = InferSelectModel<typeof grant>
 export type NewGrant = InferInsertModel<typeof grant>
+
+export const run = sandhostSchema.table(
+	"run",
+	{
+		id: idColumn().primaryKey(),
+		userId: idColumn("user_id")
+			.notNull()
+			.references(() => user.id, { onDelete: "cascade" }),
+		projectId: idColumn("project_id")
+			.notNull()
+			.references(() => project.id, { onDelete: "cascade" }),
+		hostId: idColumn("host_id")
+			.notNull()
+			.references(() => host.id, { onDelete: "cascade" }),
+		agentId: idColumn("agent_id")
+			.notNull()
+			.references(() => agent.id, { onDelete: "cascade" }),
+		grantId: idColumn("grant_id")
+			.notNull()
+			.references(() => grant.id, { onDelete: "cascade" }),
+		command: text("command").notNull(),
+		template: text("template").notNull(),
+		runtime: sandboxRuntimeEnum("runtime").notNull(),
+		network: networkModeEnum("network").notNull(),
+		status: runStatusEnum("status").notNull(),
+		exitCode: integer("exit_code"),
+		startedAt: optionalTimestampColumn("started_at"),
+		finishedAt: optionalTimestampColumn("finished_at"),
+		durationMs: integer("duration_ms"),
+	},
+	(table) => [
+		index("run_project_status_idx").on(table.projectId, table.status),
+		index("run_grant_idx").on(table.grantId),
+	],
+)
+
+export type Run = InferSelectModel<typeof run>
+export type NewRun = InferInsertModel<typeof run>

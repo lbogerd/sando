@@ -22,6 +22,7 @@ import {
 	optionalTimestampColumn,
 	project,
 	requiredTimestampColumn,
+	run,
 	runStatusEnum,
 	sandboxRuntimeEnum,
 	sandhostSchema,
@@ -275,5 +276,66 @@ describe("database schema foundation", () => {
 		expect(
 			lookupIndex?.config.columns.map((column) => ("name" in column ? column.name : undefined)),
 		).toEqual(["project_id", "host_id", "agent_id", "status"])
+	})
+
+	it("defines the Run metadata table", () => {
+		const columns = getTableColumns(run)
+		const config = getTableConfig(run)
+
+		expect(config.name).toBe("run")
+		expect(config.schema).toBe("sandhost")
+		expect(columns.id.primary).toBe(true)
+		expect(columns.userId.notNull).toBe(true)
+		expect(columns.projectId.notNull).toBe(true)
+		expect(columns.hostId.notNull).toBe(true)
+		expect(columns.agentId.notNull).toBe(true)
+		expect(columns.grantId.notNull).toBe(true)
+		expect(columns.command.notNull).toBe(true)
+		expect(columns.command.getSQLType()).toBe("text")
+		expect(columns.template.notNull).toBe(true)
+		expect(columns.template.getSQLType()).toBe("text")
+		expect(columns.runtime.notNull).toBe(true)
+		expect(columns.runtime.getSQLType()).toBe("sandbox_runtime")
+		expect(sandboxRuntimeEnum.schema).toBe("sandhost")
+		expect(columns.network.notNull).toBe(true)
+		expect(columns.network.getSQLType()).toBe("network_mode")
+		expect(networkModeEnum.schema).toBe("sandhost")
+		expect(networkModeEnum.enumValues).toEqual(["none", "default"])
+		expect(columns.status.notNull).toBe(true)
+		expect(columns.status.getSQLType()).toBe("run_status")
+		expect(runStatusEnum.schema).toBe("sandhost")
+		expect(runStatusEnum.enumValues).toEqual([
+			"queued",
+			"running",
+			"succeeded",
+			"failed",
+			"cancelled",
+			"timed_out",
+		])
+		expect(columns.exitCode.notNull).toBe(false)
+		expect(columns.exitCode.getSQLType()).toBe("integer")
+		expect(columns.startedAt.notNull).toBe(false)
+		expect(columns.finishedAt.notNull).toBe(false)
+		expect(columns.durationMs.notNull).toBe(false)
+		expect(columns.durationMs.getSQLType()).toBe("integer")
+	})
+
+	it("indexes runs by project status and grant", () => {
+		const config = getTableConfig(run)
+		const projectStatusIndex = config.indexes.find(
+			(index) => index.config.name === "run_project_status_idx",
+		)
+		const grantIndex = config.indexes.find((index) => index.config.name === "run_grant_idx")
+
+		expect(projectStatusIndex?.config.unique).toBe(false)
+		expect(
+			projectStatusIndex?.config.columns.map((column) =>
+				"name" in column ? column.name : undefined,
+			),
+		).toEqual(["project_id", "status"])
+		expect(grantIndex?.config.unique).toBe(false)
+		expect(
+			grantIndex?.config.columns.map((column) => ("name" in column ? column.name : undefined)),
+		).toEqual(["grant_id"])
 	})
 })
