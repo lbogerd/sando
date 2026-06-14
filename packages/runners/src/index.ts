@@ -1,7 +1,21 @@
 import { lstat, readFile } from "node:fs/promises"
 import { dirname, isAbsolute, join, parse as parsePath, resolve } from "node:path"
 
-import { err, ok, parseSandoPolicy, sandoError, type Result, type SandoPolicy } from "@sando/shared"
+import {
+	defaultSandoPolicy,
+	err,
+	networkModes,
+	ok,
+	parseSandoPolicy,
+	sandoError,
+	type NetworkMode,
+	type ResourceLimits,
+	type Result,
+	type RunProjectCommandInput,
+	type SandboxRuntimeKind,
+	type SandoPolicy,
+	type SecretPolicy,
+} from "@sando/shared"
 
 export const packageName = "runners"
 
@@ -38,6 +52,73 @@ export type LoadProjectPolicyInput = {
 	readonly startPath?: string
 	readonly projectRoot?: string
 }
+
+export type PolicyConstraints = {
+	readonly defaultTemplate?: string
+	readonly allowedTemplates?: readonly string[]
+	readonly runtime?: SandboxRuntimeKind
+	readonly defaultNetwork?: NetworkMode
+	readonly allowedNetworks?: readonly NetworkMode[]
+	readonly maxTtlSeconds?: number
+	readonly maxTimeoutSeconds?: number
+	readonly resources?: Partial<ResourceLimits>
+	readonly secrets?: SecretPolicy
+	readonly artifacts?: readonly string[]
+	readonly exclude?: readonly string[]
+}
+
+export type CompileEffectivePolicyInput = {
+	readonly systemPolicy?: PolicyConstraints
+	readonly hostedProjectPolicy?: PolicyConstraints
+	readonly localProjectPolicy?: PolicyConstraints
+	readonly templateDefaults?: PolicyConstraints
+	readonly grantConstraints?: PolicyConstraints
+	readonly request?: RunProjectCommandInput
+}
+
+export type EffectivePolicy = {
+	readonly template: string
+	readonly allowedTemplates: readonly string[]
+	readonly runtime: SandboxRuntimeKind
+	readonly network: NetworkMode
+	readonly allowedNetworks: readonly NetworkMode[]
+	readonly maxTtlSeconds: number
+	readonly maxTimeoutSeconds: number
+	readonly timeoutSeconds: number
+	readonly resources: ResourceLimits
+	readonly secrets: SecretPolicy
+	readonly artifacts: readonly string[]
+	readonly exclude: readonly string[]
+}
+
+export const defaultSystemPolicyConstraints = {
+	allowedTemplates: [defaultSandoPolicy.defaultTemplate],
+	runtime: "podman",
+	allowedNetworks: ["none", "default"],
+	maxTtlSeconds: 1800,
+	maxTimeoutSeconds: 600,
+	resources: {
+		cpu: 2,
+		memoryMb: 4096,
+	},
+	secrets: {
+		allow: [],
+	},
+} as const satisfies PolicyConstraints
+
+export const defaultNodeTsTemplatePolicyConstraints = {
+	defaultTemplate: "node-ts",
+	allowedTemplates: ["node-ts"],
+	defaultNetwork: "none",
+	maxTimeoutSeconds: 600,
+	resources: {
+		cpu: 2,
+		memoryMb: 4096,
+	},
+	secrets: {
+		allow: [],
+	},
+} as const satisfies PolicyConstraints
 
 export async function findProjectRoot(
 	input: FindProjectRootInput = {},
@@ -117,6 +198,257 @@ export async function loadProjectPolicy(
 		path: policyPath,
 		policy: policy.value,
 	})
+}
+
+export function compileEffectivePolicy(
+	input: CompileEffectivePolicyInput = {},
+): Result<EffectivePolicy> {
+	const layers = policyLayers(input)
+	const allowedTemplates = intersectStringSets(
+		layers.flatMap((layer) => {
+			if (layer.allowedTemplates !== undefined) {
+				return [layer.allowedTemplates]
+			}
+
+			if (layer.defaultTemplate !== undefined) {
+				return [[layer.defaultTemplate]]
+			}
+
+			return []
+		}),
+		[defaultSandoPolicy.defaultTemplate],
+	)
+
+	if (allowedTemplates.length === 0) {
+		return policyViolation("Policy layers do not allow a shared template.", {
+			field: "template",
+		})
+	}
+
+	const template = input.request?.template ?? allowedTemplates[0]
+
+	if (template === undefined || !allowedTemplates.includes(template)) {
+		return policyViolation("Requested template is not allowed by policy.", {
+			requestedTemplate: input.request?.template,
+			allowedTemplates,
+		})
+	}
+
+	const runtime = selectRuntime(layers)
+
+	if (!runtime.ok) {
+		return runtime
+	}
+
+	const allowedNetworks = intersectNetworks(
+		layers.flatMap((layer) => (layer.allowedNetworks === undefined ? [] : [layer.allowedNetworks])),
+	)
+
+	if (allowedNetworks.length === 0) {
+		return policyViolation("Policy layers do not allow a shared network mode.", {
+			field: "network",
+		})
+	}
+
+	const network = selectNetwork(input.request?.network, layers, allowedNetworks)
+
+	if (!network.ok) {
+		return network
+	}
+
+	const maxTtlSeconds = minPolicyNumber(
+		layers.map((layer) => layer.maxTtlSeconds),
+		defaultSandoPolicy.maxTtlSeconds,
+	)
+	const maxTimeoutSeconds = minPolicyNumber(
+		layers.map((layer) => layer.maxTimeoutSeconds),
+		defaultSandoPolicy.maxTimeoutSeconds,
+	)
+	const timeoutSeconds = input.request?.timeoutSeconds ?? maxTimeoutSeconds
+
+	if (timeoutSeconds > maxTimeoutSeconds) {
+		return policyViolation("Requested timeout exceeds the effective policy maximum.", {
+			requestedTimeoutSeconds: timeoutSeconds,
+			maxTimeoutSeconds,
+		})
+	}
+
+	return ok({
+		template,
+		allowedTemplates,
+		runtime: runtime.value,
+		network: network.value,
+		allowedNetworks,
+		maxTtlSeconds,
+		maxTimeoutSeconds,
+		timeoutSeconds,
+		resources: {
+			cpu: minPolicyNumber(
+				layers.map((layer) => layer.resources?.cpu),
+				defaultSandoPolicy.resources.cpu,
+			),
+			memoryMb: minPolicyNumber(
+				layers.map((layer) => layer.resources?.memoryMb),
+				defaultSandoPolicy.resources.memoryMb,
+			),
+		},
+		secrets: {
+			allow: [
+				...intersectStringSets(
+					layers.flatMap((layer) => (layer.secrets === undefined ? [] : [layer.secrets.allow])),
+					defaultSandoPolicy.secrets.allow,
+				),
+			],
+		},
+		artifacts: intersectStringSets(
+			layers.flatMap((layer) => (layer.artifacts === undefined ? [] : [layer.artifacts])),
+			defaultSandoPolicy.artifacts,
+		),
+		exclude: unionStringSets(
+			layers.flatMap((layer) => (layer.exclude === undefined ? [] : [layer.exclude])),
+			defaultSandoPolicy.exclude,
+		),
+	})
+}
+
+function policyLayers(input: CompileEffectivePolicyInput): readonly PolicyConstraints[] {
+	return [
+		input.systemPolicy ?? defaultSystemPolicyConstraints,
+		input.hostedProjectPolicy,
+		input.localProjectPolicy,
+		input.templateDefaults ?? defaultNodeTsTemplatePolicyConstraints,
+		input.grantConstraints,
+	].filter((layer): layer is PolicyConstraints => layer !== undefined)
+}
+
+function selectRuntime(layers: readonly PolicyConstraints[]): Result<SandboxRuntimeKind> {
+	const runtimes = uniqueValues(
+		layers.flatMap((layer) => (layer.runtime === undefined ? [] : [layer.runtime])),
+	)
+
+	if (runtimes.length === 0) {
+		return ok(defaultSandoPolicy.runtime)
+	}
+
+	if (runtimes.length > 1) {
+		return policyViolation("Policy layers require incompatible runtimes.", {
+			runtimes,
+		})
+	}
+
+	return ok(runtimes[0] ?? defaultSandoPolicy.runtime)
+}
+
+function selectNetwork(
+	requestedNetwork: NetworkMode | undefined,
+	layers: readonly PolicyConstraints[],
+	allowedNetworks: readonly NetworkMode[],
+): Result<NetworkMode> {
+	if (requestedNetwork !== undefined) {
+		if (allowedNetworks.includes(requestedNetwork)) {
+			return ok(requestedNetwork)
+		}
+
+		return policyViolation("Requested network mode is not allowed by policy.", {
+			requestedNetwork,
+			allowedNetworks,
+		})
+	}
+
+	const defaultNetworks = layers.flatMap((layer) =>
+		layer.defaultNetwork === undefined ? [] : [layer.defaultNetwork],
+	)
+	const defaultNetwork = mostRestrictiveNetwork(
+		defaultNetworks.filter((network) => allowedNetworks.includes(network)),
+	)
+
+	return ok(
+		defaultNetwork ?? mostRestrictiveNetwork(allowedNetworks) ?? defaultSandoPolicy.defaultNetwork,
+	)
+}
+
+function intersectNetworks(sets: readonly (readonly NetworkMode[])[]): readonly NetworkMode[] {
+	if (sets.length === 0) {
+		return [...networkModes]
+	}
+
+	return networkModes.filter((mode) => sets.every((set) => set.includes(mode)))
+}
+
+function mostRestrictiveNetwork(networks: readonly NetworkMode[]): NetworkMode | undefined {
+	return networkModes.find((mode) => networks.includes(mode))
+}
+
+function intersectStringSets(
+	sets: readonly (readonly string[])[],
+	fallback: readonly string[],
+): readonly string[] {
+	if (sets.length === 0) {
+		return uniqueStrings(fallback)
+	}
+
+	const [firstSet, ...remainingSets] = sets
+
+	if (firstSet === undefined) {
+		return []
+	}
+
+	return uniqueStrings(firstSet).filter((value) =>
+		remainingSets.every((set) => set.includes(value)),
+	)
+}
+
+function unionStringSets(
+	sets: readonly (readonly string[])[],
+	fallback: readonly string[],
+): readonly string[] {
+	if (sets.length === 0) {
+		return uniqueStrings(fallback)
+	}
+
+	return uniqueStrings(sets.flat())
+}
+
+function uniqueStrings(values: readonly string[]): string[] {
+	return uniqueValues(values)
+}
+
+function uniqueValues<Value extends string>(values: readonly Value[]): Value[] {
+	return [...new Set(values)]
+}
+
+function minPolicyNumber(values: readonly (number | undefined)[], fallback: number): number {
+	const definedValues = values.filter((value): value is number => value !== undefined)
+	return Math.min(...definedValues, fallback)
+}
+
+function policyViolation(message: string, details: Record<string, unknown>): Result<never> {
+	return err(
+		sandoError({
+			code: "POLICY_VIOLATION",
+			message,
+			details: jsonRecord(details),
+		}),
+	)
+}
+
+function jsonRecord(
+	record: Record<string, unknown>,
+): Record<string, string | number | boolean | null | string[]> {
+	return Object.fromEntries(
+		Object.entries(record).map(([key, value]) => [
+			key,
+			Array.isArray(value) ? value.map(String) : jsonScalar(value),
+		]),
+	)
+}
+
+function jsonScalar(value: unknown): string | number | boolean | null {
+	if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+		return value
+	}
+
+	return null
 }
 
 async function resolvePolicyProjectRoot(input: LoadProjectPolicyInput): Promise<Result<string>> {

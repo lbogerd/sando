@@ -10,7 +10,7 @@
 [ ] Phase 1
 -[x] Implement project root detection
 -[x] Implement .sandhost/policy.json loader
--[ ] Implement effective policy compiler
+-[x] Implement effective policy compiler
 -[ ] Implement archive file selection using git ls-files -co --exclude-standard
 -[ ] Add hardcoded sensitive-file exclusions
 -[ ] Create node-ts Containerfile

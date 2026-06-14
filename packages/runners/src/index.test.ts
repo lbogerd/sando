@@ -6,7 +6,12 @@ import { afterEach, describe, expect, it } from "vitest"
 
 import { defaultSandoPolicy } from "@sando/shared"
 
-import { findProjectRoot, loadProjectPolicy, projectPolicyFilePath } from "./index.js"
+import {
+	compileEffectivePolicy,
+	findProjectRoot,
+	loadProjectPolicy,
+	projectPolicyFilePath,
+} from "./index.js"
 
 const tempRoots: string[] = []
 
@@ -186,6 +191,186 @@ describe("loadProjectPolicy", () => {
 			expect(result.error.details).toEqual({ path: policyPath })
 			expect(result.error.cause?.details).toEqual({
 				issues: [{ path: "$.version", message: "Expected version 1." }],
+			})
+		}
+	})
+})
+
+describe("compileEffectivePolicy", () => {
+	it("uses MVP defaults when no narrower policy layer is provided", () => {
+		expect(compileEffectivePolicy()).toEqual({
+			ok: true,
+			value: {
+				template: "node-ts",
+				allowedTemplates: ["node-ts"],
+				runtime: "podman",
+				network: "none",
+				allowedNetworks: ["none", "default"],
+				maxTtlSeconds: 1800,
+				maxTimeoutSeconds: 600,
+				timeoutSeconds: 600,
+				resources: {
+					cpu: 2,
+					memoryMb: 4096,
+				},
+				secrets: {
+					allow: [],
+				},
+				artifacts: defaultSandoPolicy.artifacts,
+				exclude: defaultSandoPolicy.exclude,
+			},
+		})
+	})
+
+	it("combines system, hosted, local, template, grant, and request constraints", () => {
+		expect(
+			compileEffectivePolicy({
+				hostedProjectPolicy: {
+					allowedNetworks: ["none", "default"],
+					maxTtlSeconds: 1200,
+					maxTimeoutSeconds: 500,
+					resources: {
+						cpu: 1.5,
+						memoryMb: 2048,
+					},
+					secrets: {
+						allow: ["CI_TOKEN", "NPM_TOKEN"],
+					},
+					artifacts: ["coverage/**", "reports/**"],
+					exclude: ["tmp/**"],
+				},
+				localProjectPolicy: {
+					...defaultSandoPolicy,
+					defaultNetwork: "default",
+					maxTtlSeconds: 900,
+					maxTimeoutSeconds: 300,
+					resources: {
+						cpu: 1,
+						memoryMb: 1024,
+					},
+					secrets: {
+						allow: ["CI_TOKEN"],
+					},
+					artifacts: ["coverage/**", "test-results/**"],
+					exclude: [".env", "dist"],
+				},
+				grantConstraints: {
+					allowedNetworks: ["none"],
+					maxTtlSeconds: 600,
+					maxTimeoutSeconds: 200,
+					resources: {
+						cpu: 0.5,
+						memoryMb: 512,
+					},
+					secrets: {
+						allow: [],
+					},
+					artifacts: ["coverage/**"],
+					exclude: ["private/**"],
+				},
+				request: {
+					command: "pnpm test",
+					network: "none",
+					timeoutSeconds: 150,
+				},
+			}),
+		).toEqual({
+			ok: true,
+			value: {
+				template: "node-ts",
+				allowedTemplates: ["node-ts"],
+				runtime: "podman",
+				network: "none",
+				allowedNetworks: ["none"],
+				maxTtlSeconds: 600,
+				maxTimeoutSeconds: 200,
+				timeoutSeconds: 150,
+				resources: {
+					cpu: 0.5,
+					memoryMb: 512,
+				},
+				secrets: {
+					allow: [],
+				},
+				artifacts: ["coverage/**"],
+				exclude: ["tmp/**", ".env", "dist", "private/**"],
+			},
+		})
+	})
+
+	it("rejects a requested network outside the effective allowed set", () => {
+		const result = compileEffectivePolicy({
+			grantConstraints: {
+				allowedNetworks: ["none"],
+			},
+			request: {
+				command: "pnpm test",
+				network: "default",
+			},
+		})
+
+		expect(result.ok).toBe(false)
+		if (!result.ok) {
+			expect(result.error.code).toBe("POLICY_VIOLATION")
+			expect(result.error.details).toEqual({
+				requestedNetwork: "default",
+				allowedNetworks: ["none"],
+			})
+		}
+	})
+
+	it("rejects a requested timeout above the effective maximum", () => {
+		const result = compileEffectivePolicy({
+			localProjectPolicy: {
+				...defaultSandoPolicy,
+				maxTimeoutSeconds: 120,
+			},
+			request: {
+				command: "pnpm test",
+				timeoutSeconds: 121,
+			},
+		})
+
+		expect(result.ok).toBe(false)
+		if (!result.ok) {
+			expect(result.error.code).toBe("POLICY_VIOLATION")
+			expect(result.error.details).toEqual({
+				requestedTimeoutSeconds: 121,
+				maxTimeoutSeconds: 120,
+			})
+		}
+	})
+
+	it("rejects incompatible runtime constraints", () => {
+		const result = compileEffectivePolicy({
+			localProjectPolicy: {
+				...defaultSandoPolicy,
+				runtime: "docker",
+			},
+		})
+
+		expect(result.ok).toBe(false)
+		if (!result.ok) {
+			expect(result.error.code).toBe("POLICY_VIOLATION")
+			expect(result.error.details).toEqual({
+				runtimes: ["podman", "docker"],
+			})
+		}
+	})
+
+	it("rejects layers with no shared template", () => {
+		const result = compileEffectivePolicy({
+			localProjectPolicy: {
+				...defaultSandoPolicy,
+				defaultTemplate: "python",
+			},
+		})
+
+		expect(result.ok).toBe(false)
+		if (!result.ok) {
+			expect(result.error.code).toBe("POLICY_VIOLATION")
+			expect(result.error.details).toEqual({
+				field: "template",
 			})
 		}
 	})
