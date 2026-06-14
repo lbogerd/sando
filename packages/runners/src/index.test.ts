@@ -1,7 +1,8 @@
 import { execFile } from "node:child_process"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
-import { join } from "node:path"
+import { cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
+import { dirname, join, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 import { promisify } from "node:util"
 
 import { afterEach, describe, expect, it } from "vitest"
@@ -20,6 +21,8 @@ import {
 
 const tempRoots: string[] = []
 const execFileAsync = promisify(execFile)
+const runnersPackageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
+const nodeTsBasicFixtureRoot = join(runnersPackageRoot, "fixtures", "node-ts-basic")
 
 afterEach(async () => {
 	await Promise.all(tempRoots.splice(0).map((path) => rm(path, { force: true, recursive: true })))
@@ -467,6 +470,131 @@ describe("selectArchiveFiles", () => {
 	})
 })
 
+describe("integration fixture repo", () => {
+	it("loads and compiles policy from the node-ts fixture", async () => {
+		const root = await tempFixtureProject()
+		const sourcePath = join(root, "src", "math.ts")
+
+		await expect(findProjectRoot({ startPath: sourcePath })).resolves.toEqual({
+			ok: true,
+			value: { path: root, marker: ".sandhost/policy.json" },
+		})
+
+		const policyResult = await loadProjectPolicy({ startPath: sourcePath })
+
+		expect(policyResult.ok).toBe(true)
+		if (!policyResult.ok) {
+			return
+		}
+
+		expect(policyResult.value).toEqual({
+			projectRoot: root,
+			path: join(root, projectPolicyFilePath),
+			policy: {
+				version: 1,
+				defaultTemplate: "node-ts",
+				runtime: "podman",
+				defaultNetwork: "none",
+				allowedNetworks: ["none", "default"],
+				maxTtlSeconds: 900,
+				maxTimeoutSeconds: 120,
+				resources: {
+					cpu: 1,
+					memoryMb: 512,
+				},
+				secrets: {
+					allow: [],
+				},
+				artifacts: ["coverage/**", "test-results/**", "*.patch"],
+				exclude: [
+					".git",
+					"node_modules",
+					".env",
+					".env.*",
+					"dist",
+					"build",
+					"coverage",
+					".sandhost/runs",
+					"ignored-dir",
+				],
+			},
+		})
+
+		expect(
+			compileEffectivePolicy({
+				localProjectPolicy: policyResult.value.policy,
+				request: {
+					command: "pnpm test",
+					timeoutSeconds: 90,
+				},
+			}),
+		).toEqual({
+			ok: true,
+			value: {
+				template: "node-ts",
+				allowedTemplates: ["node-ts"],
+				runtime: "podman",
+				network: "none",
+				allowedNetworks: ["none", "default"],
+				maxTtlSeconds: 900,
+				maxTimeoutSeconds: 120,
+				timeoutSeconds: 90,
+				resources: {
+					cpu: 1,
+					memoryMb: 512,
+				},
+				secrets: {
+					allow: [],
+				},
+				artifacts: ["coverage/**", "test-results/**", "*.patch"],
+				exclude: [
+					".git",
+					"node_modules",
+					".env",
+					".env.*",
+					"dist",
+					"build",
+					"coverage",
+					".sandhost/runs",
+					"ignored-dir",
+				],
+			},
+		})
+	})
+
+	it("selects sandboxable files from the node-ts fixture repository", async () => {
+		const root = await fixtureGitProject()
+
+		await addFixtureWorkingTreeFiles(root)
+
+		const result = await selectArchiveFiles({ startPath: join(root, "test") })
+
+		expect(result.ok).toBe(true)
+		if (result.ok) {
+			expect(result.value).toEqual({
+				projectRoot: root,
+				files: [
+					".gitignore",
+					".sandhost/policy.json",
+					"README.md",
+					"notes/todo.md",
+					"package.json",
+					"src/math.ts",
+					"test/math.test.js",
+					"tsconfig.json",
+				],
+			})
+		}
+	})
+
+	it("keeps the node-ts fixture test script runnable", async () => {
+		const root = await tempFixtureProject()
+		const { stdout } = await execFileAsync("pnpm", ["test"], { cwd: root })
+
+		expect(stdout).toContain("fixture exposes a TypeScript entrypoint")
+	})
+})
+
 describe("hardcoded sensitive file exclusions", () => {
 	it("matches common secret-bearing archive paths", () => {
 		expect(isSensitiveArchiveFilePath(".env")).toBe(true)
@@ -495,6 +623,47 @@ async function tempProject(): Promise<string> {
 	const root = await mkdtemp(join(tmpdir(), "sando-runners-"))
 	tempRoots.push(root)
 	return root
+}
+
+async function tempFixtureProject(): Promise<string> {
+	const tempRoot = await tempProject()
+	const fixtureRoot = join(tempRoot, "node-ts-basic")
+
+	await cp(nodeTsBasicFixtureRoot, fixtureRoot, { recursive: true })
+
+	return fixtureRoot
+}
+
+async function fixtureGitProject(): Promise<string> {
+	const root = await tempFixtureProject()
+
+	await initGitProject(root)
+	await runGit(root, ["config", "user.email", "fixture@example.local"])
+	await runGit(root, ["config", "user.name", "Fixture"])
+	await runGit(root, ["add", "."])
+	await runGit(root, ["commit", "-m", "fixture baseline"])
+
+	return root
+}
+
+async function addFixtureWorkingTreeFiles(root: string): Promise<void> {
+	await mkdir(join(root, "notes"), { recursive: true })
+	await mkdir(join(root, "dist"), { recursive: true })
+	await mkdir(join(root, "coverage"), { recursive: true })
+	await mkdir(join(root, "ignored-dir"), { recursive: true })
+	await mkdir(join(root, "node_modules", ".cache"), { recursive: true })
+	await mkdir(join(root, ".sandhost", "runs", "run_fixture"), { recursive: true })
+	await mkdir(join(root, "certs"), { recursive: true })
+	await writeFile(join(root, "notes", "todo.md"), "safe untracked note\n")
+	await writeFile(join(root, ".env"), "TOKEN=dummy\n")
+	await writeFile(join(root, ".npmrc"), "//registry.example/:_authToken=dummy\n")
+	await writeFile(join(root, "certs", "client.key"), "dummy key\n")
+	await writeFile(join(root, "dist", "output.js"), "ignored output\n")
+	await writeFile(join(root, "coverage", "coverage.json"), "{}\n")
+	await writeFile(join(root, "ignored-dir", "generated.txt"), "ignored generated file\n")
+	await writeFile(join(root, "node_modules", ".cache", "entry"), "ignored dependency cache\n")
+	await writeFile(join(root, ".sandhost", "runs", "run_fixture", "result.json"), "{}\n")
+	await writeFile(join(root, "debug.log"), "ignored log\n")
 }
 
 async function writePolicy(root: string, policy: unknown): Promise<void> {

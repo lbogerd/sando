@@ -26,5 +26,5 @@
 -[x] Copy artifacts to .sandhost/runs/<runId>
 -[x] Write result.json
 -[x] Add cleanup-on-error/finally handling
--[ ] Add integration fixture repo
+-[x] Add integration fixture repo
 -[ ] Add WSL/Podman diagnostics spike
