@@ -13,7 +13,7 @@
 -[x] Implement effective policy compiler
 -[x] Implement archive file selection using git ls-files -co --exclude-standard
 -[x] Add hardcoded sensitive-file exclusions
--[ ] Create node-ts Containerfile
+-[x] Create node-ts Containerfile
 -[ ] Add sandbox runner script inside image
 -[ ] Implement Podman image build/pull path
 -[ ] Implement Podman create/run/destroy

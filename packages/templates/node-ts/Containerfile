@@ -1,0 +1,43 @@
+FROM docker.io/library/node:lts-bookworm
+
+LABEL org.opencontainers.image.title="sandhost node-ts runtime"
+LABEL org.opencontainers.image.description="Local sandhost runtime template for Node.js and TypeScript projects"
+
+ARG PNPM_VERSION=10.30.3
+ARG SANDHOST_UID=10001
+ARG SANDHOST_GID=10001
+
+ENV CI=true \
+	SHELL=/bin/bash \
+	SANDHOST_TEMPLATE=node-ts \
+	SANDHOST_WORKSPACE=/workspace \
+	SANDHOST_ARTIFACTS=/artifacts \
+	PNPM_HOME=/home/sandhost/.local/share/pnpm \
+	PATH=/home/sandhost/.local/share/pnpm:$PATH
+
+RUN apt-get update \
+	&& apt-get install --no-install-recommends -y \
+		bash \
+		build-essential \
+		ca-certificates \
+		coreutils \
+		curl \
+		git \
+		python3 \
+		ripgrep \
+		tar \
+		xz-utils \
+	&& rm -rf /var/lib/apt/lists/*
+
+RUN npm install --global "pnpm@${PNPM_VERSION}" \
+	&& npm cache clean --force \
+	&& groupadd --gid "${SANDHOST_GID}" sandhost \
+	&& useradd --create-home --shell /bin/bash --uid "${SANDHOST_UID}" --gid "${SANDHOST_GID}" sandhost \
+	&& mkdir -p /workspace /artifacts /sandhost/runner \
+	&& chown -R sandhost:sandhost /workspace /artifacts /sandhost /home/sandhost
+
+WORKDIR /workspace
+
+USER sandhost
+
+CMD ["bash"]
