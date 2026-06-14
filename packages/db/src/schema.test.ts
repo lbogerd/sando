@@ -10,6 +10,7 @@ import {
 	betterAuthSchema,
 	createdAtColumn,
 	databaseSchemaName,
+	grant,
 	grantScopeEnum,
 	grantStatusEnum,
 	host,
@@ -225,5 +226,54 @@ describe("database schema foundation", () => {
 		expect(
 			uniqueIndex?.config.columns.map((column) => ("name" in column ? column.name : undefined)),
 		).toEqual(["host_id", "kind", "display_name"])
+	})
+
+	it("defines the Grant metadata table", () => {
+		const columns = getTableColumns(grant)
+		const config = getTableConfig(grant)
+
+		expect(config.name).toBe("grant")
+		expect(config.schema).toBe("sandhost")
+		expect(columns.id.primary).toBe(true)
+		expect(columns.userId.notNull).toBe(true)
+		expect(columns.projectId.notNull).toBe(true)
+		expect(columns.hostId.notNull).toBe(true)
+		expect(columns.agentId.notNull).toBe(true)
+		expect(columns.capabilities.notNull).toBe(true)
+		expect(columns.capabilities.hasDefault).toBe(true)
+		expect(columns.capabilities.getSQLType()).toBe("jsonb")
+		expect(columns.constraints.notNull).toBe(true)
+		expect(columns.constraints.hasDefault).toBe(true)
+		expect(columns.constraints.getSQLType()).toBe("jsonb")
+		expect(columns.scope.notNull).toBe(true)
+		expect(columns.scope.getSQLType()).toBe("grant_scope")
+		expect(grantScopeEnum.schema).toBe("sandhost")
+		expect(grantScopeEnum.enumValues).toEqual(["one_shot", "project_window"])
+		expect(columns.status.notNull).toBe(true)
+		expect(columns.status.getSQLType()).toBe("grant_status")
+		expect(grantStatusEnum.schema).toBe("sandhost")
+		expect(grantStatusEnum.enumValues).toEqual([
+			"pending",
+			"approved",
+			"denied",
+			"expired",
+			"revoked",
+		])
+		expect(columns.expiresAt.notNull).toBe(false)
+		expect(columns.createdAt.notNull).toBe(true)
+		expect(columns.createdAt.hasDefault).toBe(true)
+		expect(columns.approvedAt.notNull).toBe(false)
+	})
+
+	it("indexes grants by authorization lookup fields", () => {
+		const config = getTableConfig(grant)
+		const lookupIndex = config.indexes.find(
+			(index) => index.config.name === "grant_authorization_lookup_idx",
+		)
+
+		expect(lookupIndex?.config.unique).toBe(false)
+		expect(
+			lookupIndex?.config.columns.map((column) => ("name" in column ? column.name : undefined)),
+		).toEqual(["project_id", "host_id", "agent_id", "status"])
 	})
 })

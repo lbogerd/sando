@@ -1,6 +1,7 @@
 import type { InferInsertModel, InferSelectModel } from "drizzle-orm"
 import {
 	boolean,
+	index,
 	jsonb,
 	pgSchema,
 	text,
@@ -80,6 +81,14 @@ export function createdAtColumn(name = "created_at") {
 
 export function metadataJsonColumn(name = "metadata") {
 	return jsonb(name).$type<MetadataJson>().notNull()
+}
+
+function capabilitiesJsonColumn(name = "capabilities") {
+	return jsonb(name).$type<string[]>().notNull().default([])
+}
+
+function constraintsJsonColumn(name = "constraints") {
+	return jsonb(name).$type<MetadataJson>().notNull().default({})
 }
 
 function authTimestampColumn(name: string) {
@@ -221,3 +230,40 @@ export const agent = sandhostSchema.table(
 
 export type Agent = InferSelectModel<typeof agent>
 export type NewAgent = InferInsertModel<typeof agent>
+
+export const grant = sandhostSchema.table(
+	"grant",
+	{
+		id: idColumn().primaryKey(),
+		userId: idColumn("user_id")
+			.notNull()
+			.references(() => user.id, { onDelete: "cascade" }),
+		projectId: idColumn("project_id")
+			.notNull()
+			.references(() => project.id, { onDelete: "cascade" }),
+		hostId: idColumn("host_id")
+			.notNull()
+			.references(() => host.id, { onDelete: "cascade" }),
+		agentId: idColumn("agent_id")
+			.notNull()
+			.references(() => agent.id, { onDelete: "cascade" }),
+		capabilities: capabilitiesJsonColumn(),
+		constraints: constraintsJsonColumn(),
+		scope: grantScopeEnum("scope").notNull(),
+		status: grantStatusEnum("status").notNull(),
+		expiresAt: optionalTimestampColumn("expires_at"),
+		createdAt: createdAtColumn(),
+		approvedAt: optionalTimestampColumn("approved_at"),
+	},
+	(table) => [
+		index("grant_authorization_lookup_idx").on(
+			table.projectId,
+			table.hostId,
+			table.agentId,
+			table.status,
+		),
+	],
+)
+
+export type Grant = InferSelectModel<typeof grant>
+export type NewGrant = InferInsertModel<typeof grant>

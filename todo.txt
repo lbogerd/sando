@@ -35,7 +35,7 @@
 -[x] Add Project table
 -[x] Add Host table
 -[x] Add Agent table
--[ ] Add Grant table
+-[x] Add Grant table
 -[ ] Add Run table
 -[ ] Add Artifact table
 -[ ] Add AuditEvent table
