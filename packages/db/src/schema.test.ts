@@ -1,4 +1,5 @@
 import { getTableColumns } from "drizzle-orm"
+import { getTableConfig } from "drizzle-orm/pg-core"
 import { describe, expect, it } from "vitest"
 
 import {
@@ -16,6 +17,7 @@ import {
 	metadataJsonColumn,
 	networkModeEnum,
 	optionalTimestampColumn,
+	project,
 	requiredTimestampColumn,
 	runStatusEnum,
 	sandboxRuntimeEnum,
@@ -114,5 +116,36 @@ describe("database schema foundation", () => {
 		expect(verificationColumns.identifier.notNull).toBe(true)
 		expect(verificationColumns.value.notNull).toBe(true)
 		expect(verificationColumns.expiresAt.notNull).toBe(true)
+	})
+
+	it("defines the Project metadata table", () => {
+		const columns = getTableColumns(project)
+		const config = getTableConfig(project)
+
+		expect(config.name).toBe("project")
+		expect(config.schema).toBe("sandhost")
+		expect(columns.id.primary).toBe(true)
+		expect(columns.userId.notNull).toBe(true)
+		expect(columns.userId.getSQLType()).toBe(`varchar(${idColumnLength})`)
+		expect(columns.name.notNull).toBe(true)
+		expect(columns.name.getSQLType()).toBe("text")
+		expect(columns.localFingerprint.notNull).toBe(true)
+		expect(columns.localFingerprint.getSQLType()).toBe("text")
+		expect(columns.policyId.notNull).toBe(true)
+		expect(columns.createdAt.notNull).toBe(true)
+		expect(columns.createdAt.hasDefault).toBe(true)
+		expect(columns.createdAt.getSQLType()).toBe("timestamp with time zone")
+	})
+
+	it("keeps project registration unique per user and local fingerprint", () => {
+		const config = getTableConfig(project)
+		const uniqueIndex = config.indexes.find(
+			(index) => index.config.name === "project_user_local_fingerprint_unique",
+		)
+
+		expect(uniqueIndex?.config.unique).toBe(true)
+		expect(
+			uniqueIndex?.config.columns.map((column) => ("name" in column ? column.name : undefined)),
+		).toEqual(["user_id", "local_fingerprint"])
 	})
 })

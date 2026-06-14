@@ -1,4 +1,13 @@
-import { boolean, jsonb, pgSchema, text, timestamp, varchar } from "drizzle-orm/pg-core"
+import type { InferInsertModel, InferSelectModel } from "drizzle-orm"
+import {
+	boolean,
+	jsonb,
+	pgSchema,
+	text,
+	timestamp,
+	uniqueIndex,
+	varchar,
+} from "drizzle-orm/pg-core"
 
 import {
 	networkModes,
@@ -145,3 +154,23 @@ export const betterAuthSchema = {
 	account,
 	verification,
 } as const
+
+export const project = sandhostSchema.table(
+	"project",
+	{
+		id: idColumn().primaryKey(),
+		userId: idColumn("user_id")
+			.notNull()
+			.references(() => user.id, { onDelete: "cascade" }),
+		name: text("name").notNull(),
+		localFingerprint: text("local_fingerprint").notNull(),
+		policyId: idColumn("policy_id").notNull(),
+		createdAt: createdAtColumn(),
+	},
+	(table) => [
+		uniqueIndex("project_user_local_fingerprint_unique").on(table.userId, table.localFingerprint),
+	],
+)
+
+export type Project = InferSelectModel<typeof project>
+export type NewProject = InferInsertModel<typeof project>
