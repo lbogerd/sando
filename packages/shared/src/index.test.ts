@@ -5,6 +5,8 @@ import {
 	defaultSandoPolicy,
 	err,
 	hostPlatforms,
+	isCreateRunInput,
+	isCreateRunResult,
 	isHostRecord,
 	isIdOfKind,
 	isProjectRecord,
@@ -14,8 +16,11 @@ import {
 	isRegisterProjectInput,
 	isRunProjectCommandInput,
 	isRunProjectCommandResult,
+	isRunRecord,
 	isSandoPolicy,
 	ok,
+	parseCreateRunInput,
+	parseCreateRunResult,
 	parseHostRecord,
 	parseHostRegistrationResult,
 	parseProjectRecord,
@@ -24,7 +29,9 @@ import {
 	parseRegisterProjectInput,
 	parseRunProjectCommandInput,
 	parseRunProjectCommandResult,
+	parseRunRecord,
 	parseSandoPolicy,
+	runStatuses,
 	sandoError,
 	type ProjectId,
 	type Result,
@@ -354,6 +361,113 @@ describe("host registration schemas", () => {
 					{ path: "$.fingerprint", message: "Expected a non-empty string." },
 					{ path: "$.createdAt", message: "Expected a non-empty string." },
 					{ path: "$.lastSeenAt", message: "Expected a non-empty string." },
+				],
+			})
+		}
+	})
+})
+
+describe("run metadata schemas", () => {
+	it("exposes queued, running, and terminal run statuses", () => {
+		expect(runStatuses).toEqual([
+			"queued",
+			"running",
+			"succeeded",
+			"failed",
+			"cancelled",
+			"timed_out",
+		])
+	})
+
+	it("accepts valid create run input and result payloads", () => {
+		const input = {
+			projectId: "proj_123",
+			hostId: "host_123",
+			agentId: "agent_123",
+			grantId: "grant_123",
+			command: "pnpm test",
+			template: "node-ts",
+			runtime: "podman",
+			network: "none",
+		}
+		const run = {
+			id: "run_123",
+			userId: "user_123",
+			...input,
+			status: "queued",
+		}
+		const result = { run }
+
+		expect(parseCreateRunInput(input)).toEqual({ ok: true, value: input })
+		expect(isCreateRunInput(input)).toBe(true)
+		expect(parseRunRecord(run)).toEqual({ ok: true, value: run })
+		expect(isRunRecord(run)).toBe(true)
+		expect(parseCreateRunResult(result)).toEqual({ ok: true, value: result })
+		expect(isCreateRunResult(result)).toBe(true)
+	})
+
+	it("rejects invalid create run input and records", () => {
+		const input = parseCreateRunInput({
+			projectId: "run_123",
+			hostId: "proj_123",
+			agentId: "host_123",
+			grantId: "agent_123",
+			command: "",
+			template: "",
+			runtime: "vm",
+			network: "private",
+		})
+		const run = parseRunRecord({
+			id: "proj_123",
+			userId: "run_123",
+			projectId: "host_123",
+			hostId: "agent_123",
+			agentId: "grant_123",
+			grantId: "run_123",
+			command: "",
+			template: "",
+			runtime: "vm",
+			network: "private",
+			status: "waiting",
+			exitCode: -1,
+			durationMs: -1,
+		})
+
+		expect(input.ok).toBe(false)
+		if (!input.ok) {
+			expect(input.error.code).toBe("VALIDATION_FAILED")
+			expect(input.error.details).toEqual({
+				issues: [
+					{ path: "$.projectId", message: "Expected a project ID." },
+					{ path: "$.hostId", message: "Expected a host ID." },
+					{ path: "$.agentId", message: "Expected an agent ID." },
+					{ path: "$.grantId", message: "Expected a grant ID." },
+					{ path: "$.command", message: "Expected a non-empty string." },
+					{ path: "$.template", message: "Expected a non-empty string." },
+					{ path: "$.runtime", message: "Expected a supported sandbox runtime." },
+					{ path: "$.network", message: "Expected a supported network mode." },
+				],
+			})
+		}
+
+		expect(run.ok).toBe(false)
+		if (!run.ok) {
+			expect(run.error.code).toBe("VALIDATION_FAILED")
+			expect(run.error.details).toEqual({
+				issues: [
+					{ path: "$.id", message: "Expected a run ID." },
+					{ path: "$.userId", message: "Expected a user ID." },
+					{ path: "$.projectId", message: "Expected a project ID." },
+					{ path: "$.hostId", message: "Expected a host ID." },
+					{ path: "$.agentId", message: "Expected an agent ID." },
+					{ path: "$.grantId", message: "Expected a grant ID." },
+					{ path: "$.command", message: "Expected a non-empty string." },
+					{ path: "$.template", message: "Expected a non-empty string." },
+					{ path: "$.runtime", message: "Expected a supported sandbox runtime." },
+					{ path: "$.network", message: "Expected a supported network mode." },
+					{ path: "$.status", message: "Expected a supported run status." },
+					{ path: "$.exitCode", message: "Expected null or a non-negative integer." },
+					{ path: "$.durationMs", message: "Expected a non-negative integer." },
 				],
 			})
 		}

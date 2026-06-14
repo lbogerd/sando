@@ -280,6 +280,14 @@ export const runProjectCommandStatusSchema = z.enum(runProjectCommandStatuses, {
 
 export type RunProjectCommandStatus = z.infer<typeof runProjectCommandStatusSchema>
 
+export const runStatuses = ["queued", "running", ...runProjectCommandStatuses] as const
+
+export const runStatusSchema = z.enum(runStatuses, {
+	error: "Expected a supported run status.",
+})
+
+export type RunStatus = z.infer<typeof runStatusSchema>
+
 export type SandoUri = `sandhost://${string}`
 
 export const sandoUriSchema = z
@@ -480,6 +488,87 @@ export function parseHostRegistrationResult(value: unknown): Result<HostRegistra
 
 export function isHostRegistrationResult(value: unknown): value is HostRegistrationResult {
 	return parseHostRegistrationResult(value).ok
+}
+
+export const runRecordSchema = z.object({
+	id: idSchema("run", "Expected a run ID."),
+	userId: idSchema("user", "Expected a user ID."),
+	projectId: idSchema("project", "Expected a project ID."),
+	hostId: idSchema("host", "Expected a host ID."),
+	agentId: idSchema("agent", "Expected an agent ID."),
+	grantId: idSchema("grant", "Expected a grant ID."),
+	command: nonEmptyStringSchema,
+	template: nonEmptyStringSchema,
+	runtime: sandboxRuntimeKindSchema,
+	network: networkModeSchema,
+	status: runStatusSchema,
+	exitCode: nullableExitCodeSchema.optional(),
+	startedAt: nonEmptyStringSchema.optional(),
+	finishedAt: nonEmptyStringSchema.optional(),
+	durationMs: nonNegativeIntegerSchema.optional(),
+})
+
+export type RunRecord = z.infer<typeof runRecordSchema>
+
+export const createRunInputSchema = z.object({
+	projectId: idSchema("project", "Expected a project ID."),
+	hostId: idSchema("host", "Expected a host ID."),
+	agentId: idSchema("agent", "Expected an agent ID."),
+	grantId: idSchema("grant", "Expected a grant ID."),
+	command: nonEmptyStringSchema,
+	template: nonEmptyStringSchema,
+	runtime: sandboxRuntimeKindSchema,
+	network: networkModeSchema,
+})
+
+export type CreateRunInput = z.infer<typeof createRunInputSchema>
+
+export const createRunResultSchema = z.object({
+	run: runRecordSchema,
+})
+
+export type CreateRunResult = z.infer<typeof createRunResultSchema>
+
+export function parseRunRecord(value: unknown): Result<RunRecord> {
+	const result = runRecordSchema.safeParse(value)
+
+	if (!result.success) {
+		return err(validationError("Invalid run record.", result.error))
+	}
+
+	return ok(result.data)
+}
+
+export function isRunRecord(value: unknown): value is RunRecord {
+	return parseRunRecord(value).ok
+}
+
+export function parseCreateRunInput(value: unknown): Result<CreateRunInput> {
+	const result = createRunInputSchema.safeParse(value)
+
+	if (!result.success) {
+		return err(validationError("Invalid create run input.", result.error))
+	}
+
+	return ok(result.data)
+}
+
+export function isCreateRunInput(value: unknown): value is CreateRunInput {
+	return parseCreateRunInput(value).ok
+}
+
+export function parseCreateRunResult(value: unknown): Result<CreateRunResult> {
+	const result = createRunResultSchema.safeParse(value)
+
+	if (!result.success) {
+		return err(validationError("Invalid create run result.", result.error))
+	}
+
+	return ok(result.data)
+}
+
+export function isCreateRunResult(value: unknown): value is CreateRunResult {
+	return parseCreateRunResult(value).ok
 }
 
 function validationError(message: string, error: z.ZodError): SandoError {

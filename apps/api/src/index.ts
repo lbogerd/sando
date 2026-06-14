@@ -12,6 +12,7 @@ import {
 	createProjectRoutes,
 	type ProjectRepository,
 } from "./projects.js"
+import { createMemoryRunRepository, createRunRoutes, type RunRepository } from "./runs.js"
 
 export const apiServiceName = "sandhost-api"
 export const apiVersion = "v1"
@@ -22,6 +23,7 @@ export type HostedAppOptions = {
 	readonly currentUser?: CurrentUserResolver
 	readonly hostRepository?: HostRepository
 	readonly projectRepository?: ProjectRepository
+	readonly runRepository?: RunRepository
 }
 
 export type HostedServerOptions = HostedAppOptions & {
@@ -34,6 +36,7 @@ export function createHostedApp(options: HostedAppOptions = {}): Hono {
 	const currentUser = options.currentUser ?? (() => null)
 	const hostRepository = options.hostRepository ?? createMemoryHostRepository()
 	const projectRepository = options.projectRepository ?? createMemoryProjectRepository()
+	const runRepository = options.runRepository ?? createMemoryRunRepository()
 	const app = new Hono()
 	const auth = options.auth
 
@@ -92,6 +95,13 @@ export function createHostedApp(options: HostedAppOptions = {}): Hono {
 			now,
 		}),
 	)
+	v1.route(
+		"/",
+		createRunRoutes({
+			currentUser,
+			runRepository,
+		}),
+	)
 
 	app.route(`/${apiVersion}`, v1)
 
@@ -137,6 +147,7 @@ export function serveHostedApp(options: HostedServerOptions = {}): ServerType {
 		...(options.projectRepository === undefined
 			? {}
 			: { projectRepository: options.projectRepository }),
+		...(options.runRepository === undefined ? {} : { runRepository: options.runRepository }),
 	})
 
 	return serve(

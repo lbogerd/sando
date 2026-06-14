@@ -41,7 +41,7 @@
 -[x] Add AuditEvent table
 -[x] Add API route: register/get project
 -[x] Add API route: register host
--[ ] Add API route: create run
+-[x] Add API route: create run
 -[ ] Add API route: finish run
 -[ ] Add API route: append audit event
 -[ ] Add API route: list run artifacts
