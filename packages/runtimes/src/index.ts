@@ -18,6 +18,9 @@ const execFileAsync = promisify(execFile)
 
 export const defaultPodmanExecutable = "podman"
 export const defaultNodeTsPodmanImage = "localhost/sandhost-node-ts:local"
+export const defaultPodmanRunnerPath = "/sandhost/runner/run.sh"
+export const defaultPodmanWorkspacePath = "/workspace"
+export const defaultPodmanArtifactPath = "/artifacts"
 
 export type SandboxHandle = {
 	readonly id: string
@@ -133,6 +136,193 @@ export type PodmanImageRef = {
 	readonly action: PodmanImageAction
 	readonly stdout: string
 	readonly stderr: string
+}
+
+export type PodmanRuntimeOptions = {
+	readonly image?: string
+	readonly imageSource?: PodmanImageSource
+	readonly podmanExecutable?: string
+	readonly commandRunner?: PodmanCommandRunner
+	readonly runnerPath?: string
+	readonly workspacePath?: string
+	readonly artifactPath?: string
+}
+
+export class PodmanRuntime implements SandboxRuntime {
+	readonly kind = "podman" as const
+
+	private readonly command: string
+	private readonly runner: PodmanCommandRunner
+	private readonly image: string
+	private readonly imageSource: PodmanImageSource | undefined
+	private readonly runnerPath: string
+	private readonly workspacePath: string
+	private readonly artifactPath: string
+
+	constructor(options: PodmanRuntimeOptions = {}) {
+		this.command = options.podmanExecutable ?? defaultPodmanExecutable
+		this.runner = options.commandRunner ?? defaultPodmanCommandRunner
+		this.image = options.image ?? defaultNodeTsPodmanImage
+		this.imageSource = options.imageSource
+		this.runnerPath = options.runnerPath ?? defaultPodmanRunnerPath
+		this.workspacePath = options.workspacePath ?? defaultPodmanWorkspacePath
+		this.artifactPath = options.artifactPath ?? defaultPodmanArtifactPath
+	}
+
+	async createSandbox(input: CreateSandboxInput): Promise<Result<SandboxHandle>> {
+		if (input.runtime !== "podman") {
+			return err(
+				sandoError({
+					code: "POLICY_VIOLATION",
+					message: "PodmanRuntime can only create podman sandboxes.",
+					details: { runtime: input.runtime },
+				}),
+			)
+		}
+
+		const image = await this.resolveImage()
+
+		if (!image.ok) {
+			return image
+		}
+
+		const name = podmanSandboxName(input.runId)
+		const workdir = input.workdir ?? this.workspacePath
+		const artifactDir = input.artifactDir ?? this.artifactPath
+		const createArgs = podmanCreateArgs({
+			artifactDir,
+			environment: input.environment,
+			image: image.value.image,
+			name,
+			workdir,
+		})
+		const create = await this.runner(this.command, createArgs)
+
+		if (!create.ok) {
+			return create
+		}
+
+		if (create.value.exitCode !== 0) {
+			return podmanImageFailure(
+				"Could not create Podman sandbox.",
+				this.command,
+				createArgs,
+				create.value,
+			)
+		}
+
+		const startArgs = ["start", name]
+		const start = await this.runner(this.command, startArgs)
+
+		if (!start.ok) {
+			return start
+		}
+
+		if (start.value.exitCode !== 0) {
+			return podmanImageFailure(
+				"Could not start Podman sandbox.",
+				this.command,
+				startArgs,
+				start.value,
+			)
+		}
+
+		return ok({
+			id: create.value.stdout.trim() || name,
+			runtime: "podman",
+			runId: input.runId,
+			metadata: {
+				artifactDir,
+				image: image.value.image,
+				name,
+				workdir,
+			},
+		})
+	}
+
+	async uploadWorkspace(_handle: SandboxHandle, _archive: WorkspaceArchive): Promise<Result<void>> {
+		return notImplemented("Podman workspace upload is not implemented yet.")
+	}
+
+	async runCommand(handle: SandboxHandle, command: CommandSpec): Promise<Result<RunResult>> {
+		const container = podmanContainerName(handle)
+
+		if (!container.ok) {
+			return container
+		}
+
+		const startedAt = new Date()
+		const args = podmanExecArgs({
+			command,
+			container: container.value,
+			runnerPath: this.runnerPath,
+		})
+		const result = await this.runner(this.command, args)
+		const finishedAt = new Date()
+
+		if (!result.ok) {
+			return result
+		}
+
+		return ok({
+			status: result.value.exitCode === 0 ? "succeeded" : "failed",
+			exitCode: result.value.exitCode,
+			stdout: result.value.stdout,
+			stderr: result.value.stderr,
+			logs: combinedLogs(result.value),
+			startedAt: startedAt.toISOString(),
+			finishedAt: finishedAt.toISOString(),
+			durationMs: Math.max(0, finishedAt.getTime() - startedAt.getTime()),
+		})
+	}
+
+	async collectArtifacts(_handle: SandboxHandle): Promise<Result<ArtifactBundle>> {
+		return notImplemented("Podman artifact collection is not implemented yet.")
+	}
+
+	async destroySandbox(handle: SandboxHandle): Promise<Result<void>> {
+		const container = podmanContainerName(handle)
+
+		if (!container.ok) {
+			return container
+		}
+
+		const args = ["rm", "--force", container.value]
+		const result = await this.runner(this.command, args)
+
+		if (!result.ok) {
+			return result
+		}
+
+		if (result.value.exitCode !== 0) {
+			return podmanImageFailure(
+				"Could not destroy Podman sandbox.",
+				this.command,
+				args,
+				result.value,
+			)
+		}
+
+		return ok(undefined)
+	}
+
+	private async resolveImage(): Promise<Result<PodmanImageRef>> {
+		if (this.imageSource === undefined) {
+			return ok({
+				image: this.image,
+				action: "existing",
+				stdout: "",
+				stderr: "",
+			})
+		}
+
+		return ensurePodmanImage({
+			image: this.image,
+			source: this.imageSource,
+			podmanExecutable: this.command,
+			commandRunner: this.runner,
+		})
+	}
 }
 
 export async function ensurePodmanImage(
@@ -290,6 +480,98 @@ function podmanBuildArgs(image: string, source: PodmanBuildImageSource): readonl
 	return args
 }
 
+type PodmanCreateArgsInput = {
+	readonly artifactDir: string
+	readonly environment: Readonly<Record<string, string>> | undefined
+	readonly image: string
+	readonly name: string
+	readonly workdir: string
+}
+
+function podmanCreateArgs(input: PodmanCreateArgsInput): readonly string[] {
+	return [
+		"create",
+		"--name",
+		input.name,
+		"--workdir",
+		input.workdir,
+		...podmanEnvArgs({
+			...input.environment,
+			SANDHOST_ARTIFACTS: input.artifactDir,
+			SANDHOST_WORKSPACE: input.workdir,
+		}),
+		input.image,
+		"sleep",
+		"infinity",
+	]
+}
+
+type PodmanExecArgsInput = {
+	readonly command: CommandSpec
+	readonly container: string
+	readonly runnerPath: string
+}
+
+function podmanExecArgs(input: PodmanExecArgsInput): readonly string[] {
+	return [
+		"exec",
+		...podmanEnvArgs(input.command.env),
+		...podmanWorkdirArgs(input.command.cwd),
+		input.container,
+		input.runnerPath,
+		"bash",
+		"-lc",
+		input.command.command,
+	]
+}
+
+function podmanEnvArgs(
+	environment: Readonly<Record<string, string>> | undefined,
+): readonly string[] {
+	return Object.entries(environment ?? {})
+		.sort(([left], [right]) => left.localeCompare(right))
+		.flatMap(([name, value]) => ["--env", `${name}=${value}`])
+}
+
+function podmanWorkdirArgs(workdir: string | undefined): readonly string[] {
+	return workdir === undefined ? [] : ["--workdir", workdir]
+}
+
+function podmanSandboxName(runId: RunId): string {
+	return `sandhost-run-${String(runId).replaceAll(/[^a-zA-Z0-9_.-]/g, "-")}`
+}
+
+function podmanContainerName(handle: SandboxHandle): Result<string> {
+	if (handle.runtime !== "podman") {
+		return err(
+			sandoError({
+				code: "SANDBOX_FAILED",
+				message: "Sandbox handle does not belong to the Podman runtime.",
+				details: { runtime: handle.runtime },
+			}),
+		)
+	}
+
+	if (isRecord(handle.metadata) && typeof handle.metadata.name === "string") {
+		return ok(handle.metadata.name)
+	}
+
+	return ok(handle.id)
+}
+
+function combinedLogs(result: PodmanCommandResult): string {
+	return [result.stdout, result.stderr].filter((value) => value.length > 0).join("")
+}
+
+function notImplemented<Value>(message: string): Result<Value> {
+	return err(
+		sandoError({
+			code: "INTERNAL",
+			message,
+		}),
+	)
+}
+
 function podmanImageFailure(
 	message: string,
 	command: string,
@@ -324,6 +606,10 @@ function commandFailureDetails(
 	}
 
 	return details
+}
+
+function isRecord(value: unknown): value is Record<string, JsonValue> {
+	return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
 type ExecFileError = NodeJS.ErrnoException & {

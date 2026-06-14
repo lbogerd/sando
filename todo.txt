@@ -16,7 +16,7 @@
 -[x] Create node-ts Containerfile
 -[x] Add sandbox runner script inside image
 -[x] Implement Podman image build/pull path
--[ ] Implement Podman create/run/destroy
+-[x] Implement Podman create/run/destroy
 -[ ] Implement network modes: none/default
 -[ ] Implement CPU/memory flags
 -[ ] Implement timeout handling
