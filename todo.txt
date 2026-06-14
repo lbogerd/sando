@@ -1,8 +1,30 @@
-[x] Create pnpm monorepo
-[x] Add shared TypeScript config, eslint/biome, vitest
-[x] Add package skeletons
-[ ] Define shared ID/result/error types
-[ ] Define policy schema
-[ ] Define SandboxRuntime interface
-[ ] Define RunProjectCommand input/result schema
-[ ] Add dev docs: architecture.md, local-dev.md
+[x] Phase 0
+-[x] Create pnpm monorepo
+-[x] Add shared TypeScript config, eslint/biome, vitest
+-[x] Add package skeletons
+-[x] Define shared ID/result/error types
+-[x] Define policy schema
+-[x] Define SandboxRuntime interface
+-[x] Define RunProjectCommand input/result schema
+-[x] Add dev docs: architecture.md, local-dev.md
+[ ] Phase 1
+-[ ] Implement project root detection
+-[ ] Implement .sandhost/policy.json loader
+-[ ] Implement effective policy compiler
+-[ ] Implement archive file selection using git ls-files -co --exclude-standard
+-[ ] Add hardcoded sensitive-file exclusions
+-[ ] Create node-ts Containerfile
+-[ ] Add sandbox runner script inside image
+-[ ] Implement Podman image build/pull path
+-[ ] Implement Podman create/run/destroy
+-[ ] Implement network modes: none/default
+-[ ] Implement CPU/memory flags
+-[ ] Implement timeout handling
+-[ ] Capture stdout/stderr/logs
+-[ ] Generate baseline git commit inside sandbox
+-[ ] Generate diff.patch and changed-files.txt
+-[ ] Copy artifacts to .sandhost/runs/<runId>
+-[ ] Write result.json
+-[ ] Add cleanup-on-error/finally handling
+-[ ] Add integration fixture repo
+-[ ] Add WSL/Podman diagnostics spike
