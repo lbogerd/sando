@@ -1,1 +1,1 @@
-export const packageName = "templates";
+export const packageName = "templates"

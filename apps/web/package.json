@@ -1,12 +1,12 @@
 {
-  "name": "@sando/web",
-  "version": "0.0.0",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "typecheck": "tsc -p tsconfig.json --noEmit"
-  },
-  "dependencies": {
-    "@sando/shared": "workspace:*"
-  }
+	"name": "@sando/web",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"typecheck": "tsc -p tsconfig.json --noEmit"
+	},
+	"dependencies": {
+		"@sando/shared": "workspace:*"
+	}
 }

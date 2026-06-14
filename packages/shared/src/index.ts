@@ -1,1 +1,1 @@
-export const packageName = "shared";
+export const packageName = "shared"

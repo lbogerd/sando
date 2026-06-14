@@ -1,1 +1,1 @@
-export const packageName = "auth";
+export const packageName = "auth"

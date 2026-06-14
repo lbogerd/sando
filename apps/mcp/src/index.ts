@@ -1,1 +1,1 @@
-export const appName = "mcp";
+export const appName = "mcp"

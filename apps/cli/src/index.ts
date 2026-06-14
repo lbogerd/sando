@@ -1,1 +1,1 @@
-export const appName = "cli";
+export const appName = "cli"

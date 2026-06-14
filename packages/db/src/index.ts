@@ -1,1 +1,1 @@
-export const packageName = "db";
+export const packageName = "db"

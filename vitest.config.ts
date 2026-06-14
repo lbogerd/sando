@@ -1,8 +1,8 @@
-import { defineConfig } from "vitest/config";
+import { defineConfig } from "vitest/config"
 
 export default defineConfig({
-  test: {
-    include: ["apps/**/*.{test,spec}.ts?(x)", "packages/**/*.{test,spec}.ts?(x)"],
-    passWithNoTests: true,
-  },
-});
+	test: {
+		include: ["apps/**/*.{test,spec}.ts?(x)", "packages/**/*.{test,spec}.ts?(x)"],
+		passWithNoTests: true,
+	},
+})
