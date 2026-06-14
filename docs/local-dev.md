@@ -38,6 +38,54 @@ pnpm --filter @sando/runtimes typecheck
 pnpm test -- packages/shared/src/index.test.ts
 ```
 
+## Local Podman Smoke Test
+
+Assuming Podman is installed, use the repo-local helper CLI to test the Phase 1
+runtime path against the committed node-ts fixture:
+
+```bash
+pnpm install
+pnpm local:doctor
+pnpm local:smoke
+```
+
+`pnpm local:doctor` checks the host shape and Podman basics:
+
+```bash
+node scripts/sandhost-local.mjs doctor
+```
+
+`pnpm local:smoke` does the small end-to-end container test:
+
+1. builds `localhost/sandhost-node-ts:local` from
+   `packages/templates/node-ts/Containerfile`;
+2. creates a no-network Podman container with CPU and memory limits;
+3. copies `packages/runners/fixtures/node-ts-basic` into `/workspace`;
+4. runs `/sandhost/runner/run.sh bash -lc "pnpm test"`;
+5. copies `/artifacts` back to `.sandhost/local-tests/<runId>`;
+6. removes the container.
+
+Useful variants:
+
+```bash
+node scripts/sandhost-local.mjs build-node-ts
+node scripts/sandhost-local.mjs smoke-node-ts --skip-build
+node scripts/sandhost-local.mjs smoke-node-ts --command="node --test test/*.test.js"
+```
+
+After a smoke run, inspect the copied artifacts:
+
+```bash
+find .sandhost/local-tests -maxdepth 2 -type f | sort
+sed -n '1,160p' .sandhost/local-tests/<runId>/logs.txt
+sed -n '1,160p' .sandhost/local-tests/<runId>/diff.patch
+sed -n '1,160p' .sandhost/local-tests/<runId>/changed-files.txt
+```
+
+Expected result: the fixture test passes, `logs.txt` contains the Node test
+output, `diff.patch` is empty for the clean fixture, and
+`changed-files.txt` is empty.
+
 ## Current Check Notes
 
 `pnpm check` runs format, lint, typecheck, and tests. At the time these docs were

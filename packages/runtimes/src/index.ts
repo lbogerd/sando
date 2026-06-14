@@ -5,6 +5,8 @@ import { release as currentOsRelease } from "node:os"
 import { join, relative, resolve, sep } from "node:path"
 import { promisify } from "node:util"
 
+import { z } from "zod"
+
 import type {
 	JsonValue,
 	NetworkMode,
@@ -14,7 +16,15 @@ import type {
 	SandboxRuntimeKind,
 	SandoError,
 } from "@sando/shared"
-import { err, ok, sandoError } from "@sando/shared"
+import {
+	err,
+	networkModeSchema,
+	ok,
+	resourceLimitsSchema,
+	runProjectCommandStatusSchema,
+	sandboxRuntimeKindSchema,
+	sandoError,
+} from "@sando/shared"
 
 export const packageName = "runtimes"
 
@@ -28,85 +38,106 @@ export const defaultPodmanArtifactPath = "/artifacts"
 export const defaultPodmanRunsRootPath = ".sandhost/runs"
 export const defaultPodmanDiagnosticsTimeoutMs = 5000
 
-export type SandboxHandle = {
-	readonly id: string
-	readonly runtime: SandboxRuntimeKind
-	readonly runId: RunId
-	readonly metadata?: JsonValue
-}
+const jsonValueSchema = z.custom<JsonValue>()
+const runIdSchema = z.custom<RunId>((value) => typeof value === "string")
 
-export type WorkspaceArchive = {
-	readonly path: string
-	readonly sizeBytes?: number
-	readonly sha256?: string
-}
+export const sandboxHandleSchema = z.object({
+	id: z.string(),
+	runtime: sandboxRuntimeKindSchema,
+	runId: runIdSchema,
+	metadata: jsonValueSchema.optional(),
+})
 
-export type CreateSandboxInput = {
-	readonly runId: RunId
-	readonly template: string
-	readonly runtime: SandboxRuntimeKind
-	readonly network: NetworkMode
-	readonly resources: ResourceLimits
-	readonly timeoutSeconds: number
-	readonly workdir?: string
-	readonly artifactDir?: string
-	readonly environment?: Readonly<Record<string, string>>
-}
+export type SandboxHandle = z.infer<typeof sandboxHandleSchema>
 
-export type CommandSpec = {
-	readonly command: string
-	readonly cwd?: string
-	readonly env?: Readonly<Record<string, string>>
-	readonly timeoutSeconds?: number
-}
+export const workspaceArchiveSchema = z.object({
+	path: z.string(),
+	sizeBytes: z.number().optional(),
+	sha256: z.string().optional(),
+})
 
-export type SandboxCommandStatus = "succeeded" | "failed" | "cancelled" | "timed_out"
+export type WorkspaceArchive = z.infer<typeof workspaceArchiveSchema>
 
-export type RunResult = {
-	readonly status: SandboxCommandStatus
-	readonly exitCode: number | null
-	readonly stdout: string
-	readonly stderr: string
-	readonly logs: string
-	readonly startedAt: string
-	readonly finishedAt: string
-	readonly durationMs: number
-}
+export const createSandboxInputSchema = z.object({
+	runId: runIdSchema,
+	template: z.string(),
+	runtime: sandboxRuntimeKindSchema,
+	network: networkModeSchema,
+	resources: resourceLimitsSchema,
+	timeoutSeconds: z.number(),
+	workdir: z.string().optional(),
+	artifactDir: z.string().optional(),
+	environment: z.record(z.string(), z.string()).optional(),
+})
 
-export type RuntimeResultJson = {
-	readonly runId: string
-	readonly runtime: SandboxRuntimeKind
-	readonly command: string
-	readonly status: SandboxCommandStatus
-	readonly exitCode: number | null
-	readonly startedAt: string
-	readonly finishedAt: string
-	readonly durationMs: number
-	readonly network?: NetworkMode
-	readonly artifacts: {
-		readonly logs: "logs.txt"
-		readonly stdout: "stdout.txt"
-		readonly stderr: "stderr.txt"
-		readonly diff: "diff.patch"
-		readonly changedFiles: "changed-files.txt"
-	}
-}
+export type CreateSandboxInput = z.infer<typeof createSandboxInputSchema>
 
-export type RuntimeArtifact = {
-	readonly name: string
-	readonly path: string
-	readonly contentType?: string
-	readonly sizeBytes?: number
-}
+export const commandSpecSchema = z.object({
+	command: z.string(),
+	cwd: z.string().optional(),
+	env: z.record(z.string(), z.string()).optional(),
+	timeoutSeconds: z.number().optional(),
+})
 
-export type ArtifactBundle = {
-	readonly rootPath: string
-	readonly artifacts: readonly RuntimeArtifact[]
-	readonly resultPath?: string
-	readonly logsPath?: string
-	readonly diffPath?: string
-	readonly changedFilesPath?: string
-}
+export type CommandSpec = z.infer<typeof commandSpecSchema>
+
+export const sandboxCommandStatusSchema = runProjectCommandStatusSchema
+
+export type SandboxCommandStatus = z.infer<typeof sandboxCommandStatusSchema>
+
+export const runResultSchema = z.object({
+	status: sandboxCommandStatusSchema,
+	exitCode: z.number().nullable(),
+	stdout: z.string(),
+	stderr: z.string(),
+	logs: z.string(),
+	startedAt: z.string(),
+	finishedAt: z.string(),
+	durationMs: z.number(),
+})
+
+export type RunResult = z.infer<typeof runResultSchema>
+
+export const runtimeResultJsonSchema = z.object({
+	runId: z.string(),
+	runtime: sandboxRuntimeKindSchema,
+	command: z.string(),
+	status: sandboxCommandStatusSchema,
+	exitCode: z.number().nullable(),
+	startedAt: z.string(),
+	finishedAt: z.string(),
+	durationMs: z.number(),
+	network: networkModeSchema.optional(),
+	artifacts: z.object({
+		logs: z.literal("logs.txt"),
+		stdout: z.literal("stdout.txt"),
+		stderr: z.literal("stderr.txt"),
+		diff: z.literal("diff.patch"),
+		changedFiles: z.literal("changed-files.txt"),
+	}),
+})
+
+export type RuntimeResultJson = z.infer<typeof runtimeResultJsonSchema>
+
+export const runtimeArtifactSchema = z.object({
+	name: z.string(),
+	path: z.string(),
+	contentType: z.string().optional(),
+	sizeBytes: z.number().optional(),
+})
+
+export type RuntimeArtifact = z.infer<typeof runtimeArtifactSchema>
+
+export const artifactBundleSchema = z.object({
+	rootPath: z.string(),
+	artifacts: z.array(runtimeArtifactSchema),
+	resultPath: z.string().optional(),
+	logsPath: z.string().optional(),
+	diffPath: z.string().optional(),
+	changedFilesPath: z.string().optional(),
+})
+
+export type ArtifactBundle = z.infer<typeof artifactBundleSchema>
 
 export interface SandboxRuntime {
 	readonly kind: SandboxRuntimeKind
@@ -164,18 +195,22 @@ export async function withSandboxCleanup<Value>(
 	return operationResult
 }
 
-export type PodmanCommandOptions = {
-	readonly cwd?: string
-	readonly timeoutMs?: number
-}
+export const podmanCommandOptionsSchema = z.object({
+	cwd: z.string().optional(),
+	timeoutMs: z.number().optional(),
+})
 
-export type PodmanCommandResult = {
-	readonly exitCode: number | null
-	readonly stdout: string
-	readonly stderr: string
-	readonly timedOut?: boolean
-	readonly signal?: string
-}
+export type PodmanCommandOptions = z.infer<typeof podmanCommandOptionsSchema>
+
+export const podmanCommandResultSchema = z.object({
+	exitCode: z.number().nullable(),
+	stdout: z.string(),
+	stderr: z.string(),
+	timedOut: z.boolean().optional(),
+	signal: z.string().optional(),
+})
+
+export type PodmanCommandResult = z.infer<typeof podmanCommandResultSchema>
 
 export type PodmanCommandRunner = (
 	command: string,
@@ -183,79 +218,106 @@ export type PodmanCommandRunner = (
 	options?: PodmanCommandOptions,
 ) => Promise<Result<PodmanCommandResult>>
 
-export type PodmanBuildImageSource = {
-	readonly kind: "build"
-	readonly contextPath: string
-	readonly containerfilePath?: string
-	readonly buildArgs?: Readonly<Record<string, string>>
-}
+export const podmanBuildImageSourceSchema = z.object({
+	kind: z.literal("build"),
+	contextPath: z.string(),
+	containerfilePath: z.string().optional(),
+	buildArgs: z.record(z.string(), z.string()).optional(),
+})
 
-export type PodmanPullImageSource = {
-	readonly kind: "pull"
-}
+export type PodmanBuildImageSource = z.infer<typeof podmanBuildImageSourceSchema>
 
-export type PodmanImageSource = PodmanBuildImageSource | PodmanPullImageSource
+export const podmanPullImageSourceSchema = z.object({
+	kind: z.literal("pull"),
+})
 
-export type EnsurePodmanImageInput = {
-	readonly image: string
-	readonly source: PodmanImageSource
-	readonly podmanExecutable?: string
-	readonly commandRunner?: PodmanCommandRunner
-}
+export type PodmanPullImageSource = z.infer<typeof podmanPullImageSourceSchema>
 
-export type PodmanImageAction = "existing" | "built" | "pulled"
+export const podmanImageSourceSchema = z.discriminatedUnion("kind", [
+	podmanBuildImageSourceSchema,
+	podmanPullImageSourceSchema,
+])
 
-export type PodmanImageRef = {
-	readonly image: string
-	readonly action: PodmanImageAction
-	readonly stdout: string
-	readonly stderr: string
-}
+export type PodmanImageSource = z.infer<typeof podmanImageSourceSchema>
 
-export type PodmanDiagnosticStatus = "pass" | "warn" | "fail"
+export const podmanImageActionSchema = z.enum(["existing", "built", "pulled"])
 
-export type PodmanDiagnosticCheck = {
-	readonly name: string
-	readonly status: PodmanDiagnosticStatus
-	readonly message: string
-	readonly details?: JsonValue
-}
+export type PodmanImageAction = z.infer<typeof podmanImageActionSchema>
 
-export type WslDiagnostics = {
-	readonly detected: boolean
-	readonly platform: string
-	readonly osRelease: string
-	readonly sources: readonly string[]
-	readonly interopAvailable: boolean
-	readonly distroName?: string
-}
+export const ensurePodmanImageInputSchema = z.object({
+	image: z.string(),
+	source: podmanImageSourceSchema,
+	podmanExecutable: z.string().optional(),
+	commandRunner: z.custom<PodmanCommandRunner>().optional(),
+})
 
-export type PodmanDiagnostics = {
-	readonly podmanExecutable: string
-	readonly wsl: WslDiagnostics
-	readonly checks: readonly PodmanDiagnosticCheck[]
-}
+export type EnsurePodmanImageInput = z.infer<typeof ensurePodmanImageInputSchema>
 
-export type DiagnosePodmanEnvironmentInput = {
-	readonly podmanExecutable?: string
-	readonly commandRunner?: PodmanCommandRunner
-	readonly environment?: Readonly<Record<string, string | undefined>>
-	readonly platform?: string
-	readonly osRelease?: string
-	readonly procVersion?: string
-	readonly timeoutMs?: number
-}
+export const podmanImageRefSchema = z.object({
+	image: z.string(),
+	action: podmanImageActionSchema,
+	stdout: z.string(),
+	stderr: z.string(),
+})
 
-export type PodmanRuntimeOptions = {
-	readonly image?: string
-	readonly imageSource?: PodmanImageSource
-	readonly podmanExecutable?: string
-	readonly commandRunner?: PodmanCommandRunner
-	readonly runnerPath?: string
-	readonly workspacePath?: string
-	readonly artifactPath?: string
-	readonly runsRootPath?: string
-}
+export type PodmanImageRef = z.infer<typeof podmanImageRefSchema>
+
+export const podmanDiagnosticStatusSchema = z.enum(["pass", "warn", "fail"])
+
+export type PodmanDiagnosticStatus = z.infer<typeof podmanDiagnosticStatusSchema>
+
+export const podmanDiagnosticCheckSchema = z.object({
+	name: z.string(),
+	status: podmanDiagnosticStatusSchema,
+	message: z.string(),
+	details: jsonValueSchema.optional(),
+})
+
+export type PodmanDiagnosticCheck = z.infer<typeof podmanDiagnosticCheckSchema>
+
+export const wslDiagnosticsSchema = z.object({
+	detected: z.boolean(),
+	platform: z.string(),
+	osRelease: z.string(),
+	sources: z.array(z.string()),
+	interopAvailable: z.boolean(),
+	distroName: z.string().optional(),
+})
+
+export type WslDiagnostics = z.infer<typeof wslDiagnosticsSchema>
+
+export const podmanDiagnosticsSchema = z.object({
+	podmanExecutable: z.string(),
+	wsl: wslDiagnosticsSchema,
+	checks: z.array(podmanDiagnosticCheckSchema),
+})
+
+export type PodmanDiagnostics = z.infer<typeof podmanDiagnosticsSchema>
+
+export const diagnosePodmanEnvironmentInputSchema = z.object({
+	podmanExecutable: z.string().optional(),
+	commandRunner: z.custom<PodmanCommandRunner>().optional(),
+	environment: z.record(z.string(), z.string().optional()).optional(),
+	platform: z.string().optional(),
+	osRelease: z.string().optional(),
+	procVersion: z.string().optional(),
+	timeoutMs: z.number().optional(),
+})
+
+export type DiagnosePodmanEnvironmentInput = z.infer<typeof diagnosePodmanEnvironmentInputSchema>
+
+export const podmanRuntimeOptionsSchema = z.object({
+	image: z.string().optional(),
+	imageSource: podmanImageSourceSchema.optional(),
+	podmanExecutable: z.string().optional(),
+	commandRunner: z.custom<PodmanCommandRunner>().optional(),
+	runnerPath: z.string().optional(),
+	workspacePath: z.string().optional(),
+	artifactPath: z.string().optional(),
+	runsRootPath: z.string().optional(),
+})
+
+export type PodmanRuntimeOptions = z.infer<typeof podmanRuntimeOptionsSchema>
 
 export class PodmanRuntime implements SandboxRuntime {
 	readonly kind = "podman" as const
@@ -749,15 +811,17 @@ function podmanBuildArgs(image: string, source: PodmanBuildImageSource): readonl
 	return args
 }
 
-type PodmanCreateArgsInput = {
-	readonly artifactDir: string
-	readonly environment: Readonly<Record<string, string>> | undefined
-	readonly image: string
-	readonly name: string
-	readonly network: NetworkMode
-	readonly resources: ResourceLimits
-	readonly workdir: string
-}
+const podmanCreateArgsInputSchema = z.object({
+	artifactDir: z.string(),
+	environment: z.record(z.string(), z.string()).optional(),
+	image: z.string(),
+	name: z.string(),
+	network: networkModeSchema,
+	resources: resourceLimitsSchema,
+	workdir: z.string(),
+})
+
+type PodmanCreateArgsInput = z.infer<typeof podmanCreateArgsInputSchema>
 
 function podmanCreateArgs(input: PodmanCreateArgsInput): readonly string[] {
 	return [
@@ -787,11 +851,13 @@ function podmanResourceArgs(resources: ResourceLimits): readonly string[] {
 	return ["--cpus", String(resources.cpu), "--memory", `${resources.memoryMb}m`]
 }
 
-type PodmanExecArgsInput = {
-	readonly command: CommandSpec
-	readonly container: string
-	readonly runnerPath: string
-}
+const podmanExecArgsInputSchema = z.object({
+	command: commandSpecSchema,
+	container: z.string(),
+	runnerPath: z.string(),
+})
+
+type PodmanExecArgsInput = z.infer<typeof podmanExecArgsInputSchema>
 
 function podmanExecArgs(input: PodmanExecArgsInput): readonly string[] {
 	return [
@@ -1286,50 +1352,76 @@ function isSuccessfulPodmanCommand(result: Result<PodmanCommandResult>): boolean
 	return result.ok && result.value.exitCode === 0
 }
 
-type PodmanInfoSummary = {
-	rootless?: boolean
-	version?: string
-	os?: string
-	arch?: string
-	cgroupManager?: string
-	cgroupVersion?: string
-	serviceIsRemote?: boolean
-}
+const podmanInfoOutputSchema = z
+	.object({
+		host: z
+			.object({
+				arch: z.string().optional(),
+				cgroupManager: z.string().optional(),
+				cgroupVersion: z.string().optional(),
+				os: z.string().optional(),
+				security: z
+					.object({
+						rootless: z.boolean().optional(),
+					})
+					.passthrough()
+					.optional(),
+				serviceIsRemote: z.boolean().optional(),
+			})
+			.passthrough()
+			.optional(),
+		version: z
+			.object({
+				Version: z.string().optional(),
+				version: z.string().optional(),
+			})
+			.passthrough()
+			.optional(),
+	})
+	.passthrough()
+
+const podmanInfoSummarySchema = z.object({
+	rootless: z.boolean().optional(),
+	version: z.string().optional(),
+	os: z.string().optional(),
+	arch: z.string().optional(),
+	cgroupManager: z.string().optional(),
+	cgroupVersion: z.string().optional(),
+	serviceIsRemote: z.boolean().optional(),
+})
+
+type PodmanInfoSummary = z.infer<typeof podmanInfoSummarySchema>
 
 function parsePodmanInfoSummary(stdout: string): Result<PodmanInfoSummary> {
 	try {
-		const parsed = JSON.parse(stdout) as unknown
+		const parsed = podmanInfoOutputSchema.safeParse(JSON.parse(stdout) as unknown)
 
-		if (!isUnknownRecord(parsed)) {
+		if (!parsed.success) {
 			return err(
 				sandoError({
 					code: "VALIDATION_FAILED",
-					message: "Expected podman info output to be a JSON object.",
+					message: "Invalid podman info JSON output.",
+					details: {
+						issues: parsed.error.issues.map((issue) => ({
+							path: issue.path.join("."),
+							message: issue.message,
+						})),
+					},
 				}),
 			)
 		}
 
-		const host = getRecordProperty(parsed, "host")
-		const security = host === undefined ? undefined : getRecordProperty(host, "security")
-		const version = getRecordProperty(parsed, "version")
-		const summary: PodmanInfoSummary = {}
-		const rootless = security?.rootless
-
-		if (typeof rootless === "boolean") {
-			summary.rootless = rootless
-		}
-
-		assignStringSummary(summary, "version", version?.Version ?? version?.version)
-		assignStringSummary(summary, "os", host?.os)
-		assignStringSummary(summary, "arch", host?.arch)
-		assignStringSummary(summary, "cgroupManager", host?.cgroupManager)
-		assignStringSummary(summary, "cgroupVersion", host?.cgroupVersion)
-
-		if (typeof host?.serviceIsRemote === "boolean") {
-			summary.serviceIsRemote = host.serviceIsRemote
-		}
-
-		return ok(summary)
+		return ok(
+			podmanInfoSummarySchema.parse({
+				rootless: parsed.data.host?.security?.rootless,
+				version: parsed.data.version?.Version ?? parsed.data.version?.version,
+				os: parsed.data.host?.os,
+				arch: parsed.data.host?.arch,
+				cgroupManager: parsed.data.host?.cgroupManager,
+				cgroupVersion: parsed.data.host?.cgroupVersion,
+				serviceIsRemote: parsed.data.host?.serviceIsRemote,
+			}),
+		)
 	} catch (error) {
 		return err(
 			sandoError({
@@ -1340,16 +1432,6 @@ function parsePodmanInfoSummary(stdout: string): Result<PodmanInfoSummary> {
 				},
 			}),
 		)
-	}
-}
-
-function assignStringSummary(
-	summary: PodmanInfoSummary,
-	key: keyof Omit<PodmanInfoSummary, "rootless" | "serviceIsRemote">,
-	value: unknown,
-): void {
-	if (typeof value === "string" && value.length > 0) {
-		summary[key] = value
 	}
 }
 
@@ -1437,18 +1519,6 @@ async function readLinuxProcVersion(): Promise<string> {
 
 function containsWslMarker(value: string): boolean {
 	return /microsoft|wsl/i.test(value)
-}
-
-function getRecordProperty(
-	record: Record<string, unknown>,
-	key: string,
-): Record<string, unknown> | undefined {
-	const value = record[key]
-	return isUnknownRecord(value) ? value : undefined
-}
-
-function isUnknownRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
 function isRecord(value: unknown): value is Record<string, JsonValue> {

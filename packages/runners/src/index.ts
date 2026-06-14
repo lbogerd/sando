@@ -3,20 +3,24 @@ import { lstat, readFile } from "node:fs/promises"
 import { dirname, isAbsolute, join, parse as parsePath, resolve } from "node:path"
 import { promisify } from "node:util"
 
+import { z } from "zod"
+
 import {
 	defaultSandoPolicy,
 	err,
+	networkModeSchema,
 	networkModes,
 	ok,
 	parseSandoPolicy,
+	resourceLimitsSchema,
+	runProjectCommandInputSchema,
+	sandboxRuntimeKindSchema,
 	sandoError,
+	sandoPolicySchema,
+	secretPolicySchema,
 	type NetworkMode,
-	type ResourceLimits,
 	type Result,
-	type RunProjectCommandInput,
 	type SandboxRuntimeKind,
-	type SandoPolicy,
-	type SecretPolicy,
 } from "@sando/shared"
 
 export const packageName = "runners"
@@ -55,78 +59,99 @@ export const projectRootStrongMarkers = [
 
 export const projectRootFallbackMarkers = ["package.json"] as const
 
-export type ProjectRootMarker =
-	| (typeof projectRootStrongMarkers)[number]
-	| (typeof projectRootFallbackMarkers)[number]
+export const projectRootMarkerSchema = z.enum([
+	...projectRootStrongMarkers,
+	...projectRootFallbackMarkers,
+])
 
-export type ProjectRoot = {
-	readonly path: string
-	readonly marker: ProjectRootMarker
-}
+export type ProjectRootMarker = z.infer<typeof projectRootMarkerSchema>
 
-export type FindProjectRootInput = {
-	readonly startPath?: string
-}
+export const projectRootSchema = z.object({
+	path: z.string(),
+	marker: projectRootMarkerSchema,
+})
 
-export type LoadedProjectPolicy = {
-	readonly projectRoot: string
-	readonly path: string
-	readonly policy: SandoPolicy
-}
+export type ProjectRoot = z.infer<typeof projectRootSchema>
 
-export type LoadProjectPolicyInput = {
-	readonly startPath?: string
-	readonly projectRoot?: string
-}
+export const findProjectRootInputSchema = z.object({
+	startPath: z.string().optional(),
+})
 
-export type ArchiveFileSelectionInput = {
-	readonly startPath?: string
-	readonly projectRoot?: string
-	readonly gitExecutable?: string
-}
+export type FindProjectRootInput = z.infer<typeof findProjectRootInputSchema>
 
-export type ArchiveFileSelection = {
-	readonly projectRoot: string
-	readonly files: readonly string[]
-}
+export const loadedProjectPolicySchema = z.object({
+	projectRoot: z.string(),
+	path: z.string(),
+	policy: sandoPolicySchema,
+})
 
-export type PolicyConstraints = {
-	readonly defaultTemplate?: string
-	readonly allowedTemplates?: readonly string[]
-	readonly runtime?: SandboxRuntimeKind
-	readonly defaultNetwork?: NetworkMode
-	readonly allowedNetworks?: readonly NetworkMode[]
-	readonly maxTtlSeconds?: number
-	readonly maxTimeoutSeconds?: number
-	readonly resources?: Partial<ResourceLimits>
-	readonly secrets?: SecretPolicy
-	readonly artifacts?: readonly string[]
-	readonly exclude?: readonly string[]
-}
+export type LoadedProjectPolicy = z.infer<typeof loadedProjectPolicySchema>
 
-export type CompileEffectivePolicyInput = {
-	readonly systemPolicy?: PolicyConstraints
-	readonly hostedProjectPolicy?: PolicyConstraints
-	readonly localProjectPolicy?: PolicyConstraints
-	readonly templateDefaults?: PolicyConstraints
-	readonly grantConstraints?: PolicyConstraints
-	readonly request?: RunProjectCommandInput
-}
+export const loadProjectPolicyInputSchema = z.object({
+	startPath: z.string().optional(),
+	projectRoot: z.string().optional(),
+})
 
-export type EffectivePolicy = {
-	readonly template: string
-	readonly allowedTemplates: readonly string[]
-	readonly runtime: SandboxRuntimeKind
-	readonly network: NetworkMode
-	readonly allowedNetworks: readonly NetworkMode[]
-	readonly maxTtlSeconds: number
-	readonly maxTimeoutSeconds: number
-	readonly timeoutSeconds: number
-	readonly resources: ResourceLimits
-	readonly secrets: SecretPolicy
-	readonly artifacts: readonly string[]
-	readonly exclude: readonly string[]
-}
+export type LoadProjectPolicyInput = z.infer<typeof loadProjectPolicyInputSchema>
+
+export const archiveFileSelectionInputSchema = z.object({
+	startPath: z.string().optional(),
+	projectRoot: z.string().optional(),
+	gitExecutable: z.string().optional(),
+})
+
+export type ArchiveFileSelectionInput = z.infer<typeof archiveFileSelectionInputSchema>
+
+export const archiveFileSelectionSchema = z.object({
+	projectRoot: z.string(),
+	files: z.array(z.string()),
+})
+
+export type ArchiveFileSelection = z.infer<typeof archiveFileSelectionSchema>
+
+export const policyConstraintsSchema = z.object({
+	defaultTemplate: z.string().optional(),
+	allowedTemplates: z.array(z.string()).optional(),
+	runtime: sandboxRuntimeKindSchema.optional(),
+	defaultNetwork: networkModeSchema.optional(),
+	allowedNetworks: z.array(networkModeSchema).optional(),
+	maxTtlSeconds: z.number().optional(),
+	maxTimeoutSeconds: z.number().optional(),
+	resources: resourceLimitsSchema.partial().optional(),
+	secrets: secretPolicySchema.optional(),
+	artifacts: z.array(z.string()).optional(),
+	exclude: z.array(z.string()).optional(),
+})
+
+export type PolicyConstraints = z.infer<typeof policyConstraintsSchema>
+
+export const compileEffectivePolicyInputSchema = z.object({
+	systemPolicy: policyConstraintsSchema.optional(),
+	hostedProjectPolicy: policyConstraintsSchema.optional(),
+	localProjectPolicy: policyConstraintsSchema.optional(),
+	templateDefaults: policyConstraintsSchema.optional(),
+	grantConstraints: policyConstraintsSchema.optional(),
+	request: runProjectCommandInputSchema.optional(),
+})
+
+export type CompileEffectivePolicyInput = z.infer<typeof compileEffectivePolicyInputSchema>
+
+export const effectivePolicySchema = z.object({
+	template: z.string(),
+	allowedTemplates: z.array(z.string()),
+	runtime: sandboxRuntimeKindSchema,
+	network: networkModeSchema,
+	allowedNetworks: z.array(networkModeSchema),
+	maxTtlSeconds: z.number(),
+	maxTimeoutSeconds: z.number(),
+	timeoutSeconds: z.number(),
+	resources: resourceLimitsSchema,
+	secrets: secretPolicySchema,
+	artifacts: z.array(z.string()),
+	exclude: z.array(z.string()),
+})
+
+export type EffectivePolicy = z.infer<typeof effectivePolicySchema>
 
 export const defaultSystemPolicyConstraints = {
 	allowedTemplates: [defaultSandoPolicy.defaultTemplate],
@@ -141,7 +166,7 @@ export const defaultSystemPolicyConstraints = {
 	secrets: {
 		allow: [],
 	},
-} as const satisfies PolicyConstraints
+} satisfies PolicyConstraints
 
 export const defaultNodeTsTemplatePolicyConstraints = {
 	defaultTemplate: "node-ts",
@@ -155,7 +180,7 @@ export const defaultNodeTsTemplatePolicyConstraints = {
 	secrets: {
 		allow: [],
 	},
-} as const satisfies PolicyConstraints
+} satisfies PolicyConstraints
 
 export async function findProjectRoot(
 	input: FindProjectRootInput = {},
@@ -312,10 +337,10 @@ export function compileEffectivePolicy(
 
 	return ok({
 		template,
-		allowedTemplates,
+		allowedTemplates: [...allowedTemplates],
 		runtime: runtime.value,
 		network: network.value,
-		allowedNetworks,
+		allowedNetworks: [...allowedNetworks],
 		maxTtlSeconds,
 		maxTimeoutSeconds,
 		timeoutSeconds,
@@ -337,14 +362,18 @@ export function compileEffectivePolicy(
 				),
 			],
 		},
-		artifacts: intersectStringSets(
-			layers.flatMap((layer) => (layer.artifacts === undefined ? [] : [layer.artifacts])),
-			defaultSandoPolicy.artifacts,
-		),
-		exclude: unionStringSets(
-			layers.flatMap((layer) => (layer.exclude === undefined ? [] : [layer.exclude])),
-			defaultSandoPolicy.exclude,
-		),
+		artifacts: [
+			...intersectStringSets(
+				layers.flatMap((layer) => (layer.artifacts === undefined ? [] : [layer.artifacts])),
+				defaultSandoPolicy.artifacts,
+			),
+		],
+		exclude: [
+			...unionStringSets(
+				layers.flatMap((layer) => (layer.exclude === undefined ? [] : [layer.exclude])),
+				defaultSandoPolicy.exclude,
+			),
+		],
 	})
 }
 
@@ -368,7 +397,7 @@ export async function selectArchiveFiles(
 
 		return ok({
 			projectRoot: projectRoot.value,
-			files: filterSensitiveArchiveFiles(parseGitNullDelimitedPaths(stdout)),
+			files: [...filterSensitiveArchiveFiles(parseGitNullDelimitedPaths(stdout))],
 		})
 	} catch (error) {
 		if (!isExecFileError(error)) {
@@ -582,8 +611,8 @@ async function resolvePolicyProjectRoot(input: LoadProjectPolicyInput): Promise<
 }
 
 async function resolveProjectRootPath(input: {
-	readonly startPath?: string
-	readonly projectRoot?: string
+	readonly startPath?: string | undefined
+	readonly projectRoot?: string | undefined
 }): Promise<Result<string>> {
 	if (input.projectRoot !== undefined) {
 		return ok(resolve(input.projectRoot))

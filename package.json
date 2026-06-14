@@ -7,6 +7,8 @@
 		"format": "oxfmt --write .",
 		"format:check": "oxfmt --check .",
 		"lint": "oxlint .",
+		"local:doctor": "node scripts/sandhost-local.mjs doctor",
+		"local:smoke": "node scripts/sandhost-local.mjs smoke-node-ts",
 		"test": "vitest run --passWithNoTests",
 		"typecheck": "pnpm -r --if-present typecheck",
 		"check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test"

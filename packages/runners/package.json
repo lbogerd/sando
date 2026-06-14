@@ -10,6 +10,7 @@
 		"typecheck": "tsc -p tsconfig.json --noEmit"
 	},
 	"dependencies": {
-		"@sando/shared": "workspace:*"
+		"@sando/shared": "workspace:*",
+		"zod": "^4.4.3"
 	}
 }
