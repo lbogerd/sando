@@ -22,6 +22,7 @@ already contains all external packages.
 ## Common Commands
 
 ```bash
+pnpm dev
 pnpm format
 pnpm format:check
 pnpm lint
@@ -36,6 +37,42 @@ Package-scoped examples:
 pnpm --filter @sando/shared typecheck
 pnpm --filter @sando/runtimes typecheck
 pnpm test -- packages/shared/src/index.test.ts
+```
+
+## Local Hosted Stack
+
+Use the root dev script to start the hosted API with a local Postgres database:
+
+```bash
+pnpm dev
+```
+
+By default this starts a Podman Postgres container named
+`sandhost-postgres`, waits for it to become ready, then starts the Hono API at
+`http://127.0.0.1:3000`. The script injects `DATABASE_URL`, `HOST`, and `PORT`
+for the API process.
+
+The current hosted API still uses in-memory repositories by default; the local
+database is available for auth/persistence wiring as those adapters are added.
+
+Useful variants:
+
+```bash
+pnpm dev -- --api-port 3001
+pnpm dev -- --postgres-port 54330
+pnpm dev -- --skip-podman
+pnpm dev -- --db-only
+pnpm dev -- --keep-podman
+```
+
+`--skip-podman` is useful when you already have a database or only want the
+in-memory API routes. `--db-only` starts just the Podman database. The named
+Podman volume `sandhost-postgres-data` keeps local database files between runs.
+
+The API can also be started directly:
+
+```bash
+pnpm dev:api
 ```
 
 ## Local Podman Smoke Test

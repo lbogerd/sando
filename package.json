@@ -4,6 +4,8 @@
 	"private": true,
 	"type": "module",
 	"scripts": {
+		"dev": "node scripts/sandhost-dev.mjs",
+		"dev:api": "tsx apps/api/src/index.ts",
 		"format": "oxfmt --write .",
 		"format:check": "oxfmt --check .",
 		"lint": "oxlint .",
@@ -17,6 +19,7 @@
 		"@types/node": "latest",
 		"oxfmt": "latest",
 		"oxlint": "latest",
+		"tsx": "^4.22.4",
 		"typescript": "latest",
 		"vitest": "latest"
 	},

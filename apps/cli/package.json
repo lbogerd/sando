@@ -10,9 +10,13 @@
 		".": "./src/index.ts"
 	},
 	"scripts": {
-		"typecheck": "tsc -p tsconfig.json --noEmit"
+		"typecheck": "tsc -p tsconfig.json --noEmit",
+		"build": "tsdown"
 	},
 	"dependencies": {
 		"@sando/shared": "workspace:*"
+	},
+	"devDependencies": {
+		"tsdown": "0.22.2"
 	}
 }
