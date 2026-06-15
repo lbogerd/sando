@@ -64,3 +64,23 @@
 -[x] Add AGENTS.md insertion/update
 -[x] Add mcp smoke test script
 -[x] Add sandhost doctor checks for Codex MCP config
+Phase 5 — Agent Auth grants | target: Codex path requires scoped hosted approval before execution.
+-[ ] Implement BetterAuthAgentAuthority adapter
+-[ ] Expose /.well-known/agent-configuration
+-[ ] Define MVP capability registry
+-[ ] Register Codex agent identity
+-[ ] Register local host identity
+-[ ] Create grant request API
+-[ ] Create approval page
+-[ ] Add Approve once
+-[ ] Add Approve for 30 minutes
+-[ ] Add Deny
+-[ ] Issue/check short-lived execution authority
+-[ ] Enforce constraints before local execution
+-[ ] Enforce projectId/hostId/agentId/template/runtime/network/timeout
+-[ ] Add command hash for one-shot grants
+-[ ] Add grant expiry/revocation handling
+-[ ] Add audit hooks for grant lifecycle
+-[ ] Update MCP tool to request grant before run
+-[ ] Add grant polling or device-flow-style waiting
+-[ ] Add clear error when approval is denied/expired`
