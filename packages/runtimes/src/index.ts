@@ -421,8 +421,40 @@ export class PodmanRuntime implements SandboxRuntime {
 		})
 	}
 
-	async uploadWorkspace(_handle: SandboxHandle, _archive: WorkspaceArchive): Promise<Result<void>> {
-		return notImplemented("Podman workspace upload is not implemented yet.")
+	async uploadWorkspace(handle: SandboxHandle, archive: WorkspaceArchive): Promise<Result<void>> {
+		const container = podmanContainerName(handle)
+
+		if (!container.ok) {
+			return container
+		}
+
+		const source = await podmanWorkspaceCopySource(archive.path)
+
+		if (!source.ok) {
+			return source
+		}
+
+		const args = [
+			"cp",
+			source.value,
+			podmanWorkspaceCopyTarget(container.value, podmanWorkspaceDir(handle, this.workspacePath)),
+		]
+		const result = await this.runner(this.command, args)
+
+		if (!result.ok) {
+			return result
+		}
+
+		if (result.value.exitCode !== 0) {
+			return podmanImageFailure(
+				"Could not upload workspace to Podman sandbox.",
+				this.command,
+				args,
+				result.value,
+			)
+		}
+
+		return ok(undefined)
 	}
 
 	async runCommand(handle: SandboxHandle, command: CommandSpec): Promise<Result<RunResult>> {
@@ -896,6 +928,28 @@ function podmanArtifactCopySource(container: string, artifactDir: string): strin
 	return `${container}:${artifactDir.replace(/\/+$/, "")}/.`
 }
 
+function podmanWorkspaceDir(handle: SandboxHandle, fallback: string): string {
+	if (isRecord(handle.metadata) && typeof handle.metadata.workdir === "string") {
+		return handle.metadata.workdir
+	}
+
+	return fallback
+}
+
+async function podmanWorkspaceCopySource(path: string): Promise<Result<string>> {
+	try {
+		const pathStat = await stat(path)
+
+		return ok(pathStat.isDirectory() ? `${path.replace(/\/+$/, "")}/.` : path)
+	} catch (error) {
+		return fileSystemFailure("Could not read workspace archive path.", error, { path })
+	}
+}
+
+function podmanWorkspaceCopyTarget(container: string, workspaceDir: string): string {
+	return `${container}:${workspaceDir.replace(/\/+$/, "")}/`
+}
+
 function runArtifactsPath(runsRootPath: string, runId: RunId): string {
 	return join(runsRootPath, String(runId))
 }
@@ -1109,15 +1163,6 @@ function metadataNetworkMode(handle: SandboxHandle): NetworkMode | undefined {
 
 function combinedLogs(result: PodmanCommandResult): string {
 	return [result.stdout, result.stderr].filter((value) => value.length > 0).join("")
-}
-
-function notImplemented<Value>(message: string): Result<Value> {
-	return err(
-		sandoError({
-			code: "INTERNAL",
-			message,
-		}),
-	)
 }
 
 function fileSystemFailure(

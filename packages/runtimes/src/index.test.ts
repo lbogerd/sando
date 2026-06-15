@@ -777,6 +777,29 @@ describe("PodmanRuntime", () => {
 		])
 	})
 
+	it("uploads a workspace directory into an existing Podman sandbox", async () => {
+		const workspaceRoot = await mkdtemp(join(tmpdir(), "sando-runtimes-workspace-"))
+		tempRoots.push(workspaceRoot)
+		const runner = fakePodmanRunner([{ exitCode: 0, stdout: "", stderr: "" }])
+		const runtime = new PodmanRuntime({
+			commandRunner: runner.run,
+		})
+
+		await writeFile(join(workspaceRoot, "package.json"), "{}\n")
+
+		const result = await runtime.uploadWorkspace(podmanHandle(), {
+			path: workspaceRoot,
+		})
+
+		expect(result).toEqual({ ok: true, value: undefined })
+		expect(runner.calls).toEqual([
+			{
+				command: "podman",
+				args: ["cp", `${workspaceRoot}/.`, "sandhost-run-run_123:/workspace/"],
+			},
+		])
+	})
+
 	it("uses the sandbox timeout when running commands", async () => {
 		const runner = fakePodmanRunner([{ exitCode: 0, stdout: "ok", stderr: "" }])
 		const runtime = new PodmanRuntime({

@@ -1,16 +1,20 @@
 import { execFile } from "node:child_process"
-import { lstat, readFile } from "node:fs/promises"
-import { dirname, isAbsolute, join, parse as parsePath, resolve } from "node:path"
+import { randomBytes, createHash } from "node:crypto"
+import { copyFile, lstat, mkdir, mkdtemp, readFile, readdir, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { dirname, isAbsolute, join, parse as parsePath, relative, resolve, sep } from "node:path"
 import { promisify } from "node:util"
 
 import { z } from "zod"
 
 import {
+	asId,
 	defaultSandoPolicy,
 	err,
 	networkModeSchema,
 	networkModes,
 	ok,
+	parseRunProjectCommandInput,
 	parseSandoPolicy,
 	resourceLimitsSchema,
 	runProjectCommandInputSchema,
@@ -20,8 +24,21 @@ import {
 	secretPolicySchema,
 	type NetworkMode,
 	type Result,
+	type RunProjectCommandInput,
+	type RunProjectCommandResult,
+	type RunId,
 	type SandboxRuntimeKind,
+	type SandoUri,
 } from "@sando/shared"
+import {
+	PodmanRuntime,
+	defaultPodmanRunsRootPath,
+	type ArtifactBundle,
+	type RuntimeArtifact,
+	type SandboxRuntime,
+	type WorkspaceArchive,
+	withSandboxCleanup,
+} from "@sando/runtimes"
 
 export const packageName = "runners"
 
@@ -56,6 +73,7 @@ export const projectRootStrongMarkers = [
 	".git",
 	"pnpm-workspace.yaml",
 ] as const
+export const projectRunArtifactsRootPath = defaultPodmanRunsRootPath
 
 export const projectRootFallbackMarkers = ["package.json"] as const
 
@@ -108,6 +126,16 @@ export const archiveFileSelectionSchema = z.object({
 })
 
 export type ArchiveFileSelection = z.infer<typeof archiveFileSelectionSchema>
+
+export const runProjectCommandOptionsSchema = z.object({
+	startPath: z.string().optional(),
+	projectRoot: z.string().optional(),
+	runId: z.string().optional(),
+	runsRootPath: z.string().optional(),
+	runtime: z.custom<SandboxRuntime>().optional(),
+})
+
+export type RunProjectCommandOptions = z.infer<typeof runProjectCommandOptionsSchema>
 
 export const policyConstraintsSchema = z.object({
 	defaultTemplate: z.string().optional(),
@@ -420,6 +448,182 @@ export async function selectArchiveFiles(
 	}
 }
 
+export async function runProjectCommand(
+	inputValue: unknown,
+	options: RunProjectCommandOptions = {},
+): Promise<Result<RunProjectCommandResult>> {
+	const input = parseRunProjectCommandInput(inputValue)
+
+	if (!input.ok) {
+		return input
+	}
+
+	const policy = await loadProjectPolicy({
+		startPath: options.startPath,
+		projectRoot: options.projectRoot,
+	})
+
+	if (!policy.ok) {
+		return policy
+	}
+
+	const effectivePolicy = compileEffectivePolicy({
+		localProjectPolicy: policy.value.policy,
+		request: input.value,
+	})
+
+	if (!effectivePolicy.ok) {
+		return effectivePolicy
+	}
+
+	const archiveFiles = await selectArchiveFiles({ projectRoot: policy.value.projectRoot })
+
+	if (!archiveFiles.ok) {
+		return archiveFiles
+	}
+
+	const runId = asRunId(options.runId ?? createRunId())
+	const runtime =
+		options.runtime ??
+		new PodmanRuntime({
+			runsRootPath: options.runsRootPath,
+		})
+	const workspace = await createWorkspaceSnapshot(archiveFiles.value, runId)
+
+	if (!workspace.ok) {
+		return workspace
+	}
+
+	try {
+		const sandbox = await runtime.createSandbox({
+			runId,
+			template: effectivePolicy.value.template,
+			runtime: effectivePolicy.value.runtime,
+			network: effectivePolicy.value.network,
+			resources: effectivePolicy.value.resources,
+			timeoutSeconds: effectivePolicy.value.timeoutSeconds,
+		})
+
+		if (!sandbox.ok) {
+			return sandbox
+		}
+
+		return await withSandboxCleanup(runtime, sandbox.value, async (handle) => {
+			const uploaded = await runtime.uploadWorkspace(handle, workspace.value)
+
+			if (!uploaded.ok) {
+				return uploaded
+			}
+
+			const commandResult = await runtime.runCommand(handle, {
+				command: input.value.command,
+				timeoutSeconds: effectivePolicy.value.timeoutSeconds,
+			})
+
+			if (!commandResult.ok) {
+				return commandResult
+			}
+
+			const artifacts = await runtime.collectArtifacts(handle)
+
+			if (!artifacts.ok) {
+				return artifacts
+			}
+
+			return ok(
+				runProjectCommandResult({
+					artifacts: artifacts.value,
+					command: input.value,
+					durationMs: commandResult.value.durationMs,
+					exitCode: commandResult.value.exitCode,
+					network: effectivePolicy.value.network,
+					runId,
+					status: commandResult.value.status,
+					timeoutSeconds: effectivePolicy.value.timeoutSeconds,
+				}),
+			)
+		})
+	} finally {
+		await rm(workspace.value.path, { force: true, recursive: true })
+	}
+}
+
+export async function readRunLogs(
+	input: { readonly runId: string; readonly runsRootPath?: string } | string,
+): Promise<Result<string>> {
+	const value = typeof input === "string" ? { runId: input } : input
+	return readRunTextArtifact(value.runId, "logs.txt", value.runsRootPath)
+}
+
+export async function readRunDiff(
+	input: { readonly runId: string; readonly runsRootPath?: string } | string,
+): Promise<Result<string>> {
+	const value = typeof input === "string" ? { runId: input } : input
+	return readRunTextArtifact(value.runId, "diff.patch", value.runsRootPath)
+}
+
+export async function readRunArtifact(input: {
+	readonly artifactId?: string
+	readonly name?: string
+	readonly runId?: string
+	readonly runsRootPath?: string
+}): Promise<Result<{ readonly artifact: RuntimeArtifact; readonly content: string }>> {
+	const root = resolve(input.runsRootPath ?? projectRunArtifactsRootPath)
+
+	if (input.artifactId !== undefined) {
+		return readRunArtifactById(root, input.artifactId)
+	}
+
+	if (input.runId === undefined || input.name === undefined) {
+		return err(
+			sandoError({
+				code: "VALIDATION_FAILED",
+				message: "Expected either artifactId or both runId and name.",
+			}),
+		)
+	}
+
+	return readNamedRunArtifact(root, input.runId, input.name)
+}
+
+export async function readRunResult(input: {
+	readonly runId: string
+	readonly runsRootPath?: string
+}): Promise<Result<unknown>> {
+	return readJsonFile(
+		join(resolve(input.runsRootPath ?? projectRunArtifactsRootPath), input.runId, "result.json"),
+	)
+}
+
+export function runLogsRef(runId: RunId | string): SandoUri {
+	return `sandhost://runs/${runId}/logs`
+}
+
+export function runDiffRef(runId: RunId | string): SandoUri {
+	return `sandhost://runs/${runId}/diff`
+}
+
+export function runStdoutRef(runId: RunId | string): SandoUri {
+	return `sandhost://runs/${runId}/stdout`
+}
+
+export function runStderrRef(runId: RunId | string): SandoUri {
+	return `sandhost://runs/${runId}/stderr`
+}
+
+export function runChangedFilesRef(runId: RunId | string): SandoUri {
+	return `sandhost://runs/${runId}/changed-files`
+}
+
+export function runAuditRef(runId: RunId | string): SandoUri {
+	return `sandhost://runs/${runId}/audit`
+}
+
+export function artifactIdForRunArtifact(runId: RunId | string, name: string): string {
+	const digest = createHash("sha256").update(`${runId}\0${name}`).digest("hex").slice(0, 16)
+	return `art_${digest}`
+}
+
 function parseGitNullDelimitedPaths(output: string): readonly string[] {
 	return output
 		.split("\0")
@@ -464,6 +668,308 @@ function stringListIncludes(values: readonly string[], value: string): boolean {
 
 function normalizeArchivePath(path: string): string {
 	return path.replaceAll("\\", "/").replace(/^\/+/, "")
+}
+
+function asRunId(value: string): RunId {
+	return asId("run", value.startsWith("run_") ? value : `run_${value}`)
+}
+
+function createRunId(): string {
+	return `run_${Date.now().toString(36)}_${randomBytes(4).toString("hex")}`
+}
+
+async function createWorkspaceSnapshot(
+	selection: ArchiveFileSelection,
+	runId: RunId,
+): Promise<Result<WorkspaceArchive>> {
+	const root = await createTempWorkspaceRoot(runId)
+
+	if (!root.ok) {
+		return root
+	}
+
+	try {
+		for (const file of selection.files) {
+			const source = join(selection.projectRoot, file)
+			const destination = join(root.value, file)
+
+			await mkdir(dirname(destination), { recursive: true })
+			await copyFile(source, destination)
+		}
+
+		return ok({ path: root.value })
+	} catch (error) {
+		await rm(root.value, { force: true, recursive: true })
+		return fileSystemFailure("Could not create workspace snapshot.", error, {
+			projectRoot: selection.projectRoot,
+			path: root.value,
+		})
+	}
+}
+
+async function createTempWorkspaceRoot(runId: RunId): Promise<Result<string>> {
+	try {
+		return ok(await mkdtemp(join(tmpdir(), `sandhost-${runId}-`)))
+	} catch (error) {
+		return fileSystemFailure("Could not create temporary workspace snapshot.", error, {
+			runId: String(runId),
+		})
+	}
+}
+
+function runProjectCommandResult(input: {
+	readonly artifacts: ArtifactBundle
+	readonly command: RunProjectCommandInput
+	readonly durationMs: number
+	readonly exitCode: number | null
+	readonly network: NetworkMode
+	readonly runId: RunId
+	readonly status: RunProjectCommandResult["status"]
+	readonly timeoutSeconds: number
+}): RunProjectCommandResult {
+	const diffRef = input.artifacts.diffPath === undefined ? undefined : runDiffRef(input.runId)
+	const changedFilesRef =
+		input.artifacts.changedFilesPath === undefined ? undefined : runChangedFilesRef(input.runId)
+
+	return {
+		runId: input.runId,
+		status: input.status,
+		exitCode: input.exitCode,
+		durationMs: input.durationMs,
+		command: input.command.command,
+		network: input.network,
+		summary: summarizeRun(input),
+		logsRef: runLogsRef(input.runId),
+		stdoutRef: runStdoutRef(input.runId),
+		stderrRef: runStderrRef(input.runId),
+		...(diffRef === undefined ? {} : { diffRef }),
+		...(changedFilesRef === undefined ? {} : { changedFilesRef }),
+		artifacts: input.artifacts.artifacts.map((artifact) => ({
+			id: asId("artifact", artifactIdForRunArtifact(input.runId, artifact.name)),
+			name: artifact.name,
+			uri: artifactUri(input.runId, artifact.name),
+			...(artifact.contentType === undefined ? {} : { contentType: artifact.contentType }),
+			...(artifact.sizeBytes === undefined ? {} : { sizeBytes: artifact.sizeBytes }),
+		})),
+		auditRef: runAuditRef(input.runId),
+	}
+}
+
+function summarizeRun(input: {
+	readonly command: RunProjectCommandInput
+	readonly exitCode: number | null
+	readonly status: RunProjectCommandResult["status"]
+	readonly timeoutSeconds: number
+}): string {
+	switch (input.status) {
+		case "succeeded":
+			return `Command succeeded: ${input.command.command}`
+		case "failed":
+			return `Command failed with exit code ${input.exitCode ?? "unknown"}: ${input.command.command}`
+		case "timed_out":
+			return `Command timed out after ${input.timeoutSeconds} seconds: ${input.command.command}`
+		case "cancelled":
+			return `Command was cancelled: ${input.command.command}`
+	}
+}
+
+function artifactUri(runId: RunId, name: string): SandoUri {
+	return `sandhost://artifacts/${artifactIdForRunArtifact(runId, name)}`
+}
+
+async function readRunTextArtifact(
+	runId: string,
+	name: string,
+	runsRootPath?: string,
+): Promise<Result<string>> {
+	const result = await readNamedRunArtifact(
+		resolve(runsRootPath ?? projectRunArtifactsRootPath),
+		runId,
+		name,
+	)
+
+	if (!result.ok) {
+		return result
+	}
+
+	return ok(result.value.content)
+}
+
+async function readRunArtifactById(
+	runsRootPath: string,
+	artifactId: string,
+): Promise<Result<{ readonly artifact: RuntimeArtifact; readonly content: string }>> {
+	try {
+		const runsRootEntries = await lstat(runsRootPath)
+
+		if (!runsRootEntries.isDirectory()) {
+			return notFound("Sandhost runs path is not a directory.", { path: runsRootPath })
+		}
+	} catch (error) {
+		return fileSystemFailure("Could not read sandhost runs path.", error, { path: runsRootPath })
+	}
+
+	const runDirectories = await listDirectoryNames(runsRootPath)
+
+	if (!runDirectories.ok) {
+		return runDirectories
+	}
+
+	for (const runId of runDirectories.value) {
+		const artifacts = await listRunArtifacts(runsRootPath, runId)
+
+		if (!artifacts.ok) {
+			continue
+		}
+
+		for (const artifact of artifacts.value) {
+			if (artifactIdForRunArtifact(runId, artifact.name) === artifactId) {
+				const content = await readTextFileContent(artifact.path)
+				return content.ok ? ok({ artifact, content: content.value }) : content
+			}
+		}
+	}
+
+	return notFound("Could not find sandhost artifact.", { artifactId })
+}
+
+async function readNamedRunArtifact(
+	runsRootPath: string,
+	runId: string,
+	name: string,
+): Promise<Result<{ readonly artifact: RuntimeArtifact; readonly content: string }>> {
+	const artifacts = await listRunArtifacts(runsRootPath, runId)
+
+	if (!artifacts.ok) {
+		return artifacts
+	}
+
+	const artifact = artifacts.value.find((candidate) => candidate.name === name)
+
+	if (artifact === undefined) {
+		return notFound("Could not find sandhost run artifact.", { runId, name })
+	}
+
+	const content = await readTextFileContent(artifact.path)
+	return content.ok ? ok({ artifact, content: content.value }) : content
+}
+
+async function listRunArtifacts(
+	runsRootPath: string,
+	runId: string,
+): Promise<Result<RuntimeArtifact[]>> {
+	const runRoot = join(runsRootPath, runId)
+
+	return listArtifactsInRoot(runRoot)
+}
+
+async function listArtifactsInRoot(
+	rootPath: string,
+	currentPath: string = rootPath,
+): Promise<Result<RuntimeArtifact[]>> {
+	const names = await listDirectoryNames(currentPath)
+
+	if (!names.ok) {
+		return names
+	}
+
+	const artifacts: RuntimeArtifact[] = []
+
+	for (const name of names.value) {
+		const path = join(currentPath, name)
+		const file = await lstat(path)
+
+		if (file.isDirectory()) {
+			const nested = await listArtifactsInRoot(rootPath, path)
+
+			if (!nested.ok) {
+				return nested
+			}
+
+			artifacts.push(...nested.value)
+			continue
+		}
+
+		if (!file.isFile()) {
+			continue
+		}
+
+		artifacts.push({
+			name: relative(rootPath, path).split(sep).join("/"),
+			path,
+			sizeBytes: file.size,
+		})
+	}
+
+	return ok(artifacts)
+}
+
+async function listDirectoryNames(path: string): Promise<Result<string[]>> {
+	try {
+		const entries = await readdir(path, { withFileTypes: true })
+		return ok(entries.map((entry) => entry.name).sort())
+	} catch (error) {
+		return fileSystemFailure("Could not read directory.", error, { path })
+	}
+}
+
+async function readTextFileContent(path: string): Promise<Result<string>> {
+	try {
+		return ok(await readFile(path, "utf8"))
+	} catch (error) {
+		return fileSystemFailure("Could not read sandhost artifact.", error, { path })
+	}
+}
+
+async function readJsonFile(path: string): Promise<Result<unknown>> {
+	const content = await readTextFileContent(path)
+
+	if (!content.ok) {
+		return content
+	}
+
+	try {
+		return ok(JSON.parse(content.value) as unknown)
+	} catch (error) {
+		if (error instanceof SyntaxError) {
+			return err(
+				sandoError({
+					code: "VALIDATION_FAILED",
+					message: "Sandhost JSON artifact contains invalid JSON.",
+					details: { path, message: error.message },
+				}),
+			)
+		}
+
+		throw error
+	}
+}
+
+function notFound(message: string, details: Record<string, string>): Result<never> {
+	return err(
+		sandoError({
+			code: "NOT_FOUND",
+			message,
+			details,
+		}),
+	)
+}
+
+function fileSystemFailure(
+	message: string,
+	error: unknown,
+	details: Record<string, string>,
+): Result<never> {
+	return err(
+		sandoError({
+			code: isNodeError(error) && error.code === "ENOENT" ? "NOT_FOUND" : "INTERNAL",
+			message,
+			details: {
+				...details,
+				errorCode: isNodeError(error) && error.code !== undefined ? error.code : "UNKNOWN",
+			},
+		}),
+	)
 }
 
 function policyLayers(input: CompileEffectivePolicyInput): readonly PolicyConstraints[] {

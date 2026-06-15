@@ -1,11 +1,21 @@
 import { describe, expect, it } from "vitest"
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { defaultSandoPolicy } from "@sando/shared"
 
-import { appName, cliVersion, formatSessionEnv, readLocalAuthSession, runCli } from "./index.js"
+import {
+	appName,
+	cliVersion,
+	defaultCodexMcpCommand,
+	defaultPolicyFile,
+	defaultProjectFile,
+	formatSessionEnv,
+	initializeSandhostProject,
+	readLocalAuthSession,
+	runCli,
+} from "./index.js"
 
 describe("sandhost CLI", () => {
 	it("prints help", () => {
@@ -16,6 +26,8 @@ describe("sandhost CLI", () => {
 			stderr: "",
 		})
 		expect(result.stdout).toContain(`sandhost ${cliVersion}`)
+		expect(result.stdout).toContain("sandhost init --codex")
+		expect(result.stdout).toContain("sandhost mcp")
 		expect(result.stdout).toContain("sandhost run --command")
 	})
 
@@ -87,6 +99,7 @@ describe("sandhost CLI", () => {
 	it("prints a small doctor report", () => {
 		const result = runCli(["doctor"], {
 			SANDHOST_API_URL: "https://api.example.test",
+			SANDHOST_CODEX_BIN: "missing-codex-for-test",
 			SANDHOST_SESSION_FILE: "/tmp/sandhost-session.env",
 			WSL_DISTRO_NAME: "Ubuntu",
 		})
@@ -94,6 +107,11 @@ describe("sandhost CLI", () => {
 		expect(result.exitCode).toBe(0)
 		expect(JSON.parse(result.stdout)).toMatchObject({
 			apiUrl: "https://api.example.test",
+			codex: {
+				available: false,
+				command: "missing-codex-for-test",
+				sandhostConfigured: null,
+			},
 			defaultNetwork: "none",
 			sessionFile: "/tmp/sandhost-session.env",
 			wsl: {
@@ -109,6 +127,105 @@ describe("sandhost CLI", () => {
 		expect(result.exitCode).toBe(64)
 		expect(result.stdout).toBe("")
 		expect(result.stderr).toContain("Unknown command: wat")
+	})
+
+	it("initializes project files and configures Codex MCP", () => {
+		const root = mkdtempSync(join(tmpdir(), "sandhost-cli-init-"))
+		const calls: Array<{ args: readonly string[]; command: string; cwd: string }> = []
+
+		try {
+			writeFileSync(join(root, "package.json"), JSON.stringify({ name: "fixture-app" }))
+
+			const result = initializeSandhostProject({
+				codex: true,
+				now: new Date("2026-06-15T12:00:00.000Z"),
+				projectRoot: root,
+				runCommand: (command, args, options) => {
+					calls.push({ command, args, cwd: options.cwd })
+					return {
+						status: 0,
+						stdout: "",
+						stderr: "",
+					}
+				},
+			})
+
+			expect(result).toMatchObject({
+				projectRoot: root,
+				project: {
+					path: join(root, defaultProjectFile),
+					status: "created",
+				},
+				policy: {
+					path: join(root, defaultPolicyFile),
+					status: "created",
+				},
+				agents: {
+					path: join(root, "AGENTS.md"),
+					status: "created",
+				},
+				codex: {
+					command: "codex",
+					args: ["mcp", "add", "sandhost", "--", ...defaultCodexMcpCommand],
+					status: "configured",
+				},
+			})
+			expect(calls).toEqual([
+				{
+					command: "codex",
+					args: ["mcp", "add", "sandhost", "--", ...defaultCodexMcpCommand],
+					cwd: root,
+				},
+			])
+			expect(JSON.parse(readFileSync(join(root, defaultProjectFile), "utf8"))).toEqual({
+				version: 1,
+				name: "fixture-app",
+				createdAt: "2026-06-15T12:00:00.000Z",
+				mcp: {
+					serverName: "sandhost",
+				},
+			})
+			expect(JSON.parse(readFileSync(join(root, defaultPolicyFile), "utf8"))).toEqual(
+				defaultSandoPolicy,
+			)
+			expect(readFileSync(join(root, "AGENTS.md"), "utf8")).toContain(
+				"sandhost_run_project_command",
+			)
+		} finally {
+			rmSync(root, { recursive: true, force: true })
+		}
+	})
+
+	it("keeps init idempotent and reports unavailable Codex without failing setup", () => {
+		const root = mkdtempSync(join(tmpdir(), "sandhost-cli-init-"))
+
+		try {
+			const first = initializeSandhostProject({
+				codex: false,
+				projectRoot: root,
+			})
+			const second = initializeSandhostProject({
+				codex: true,
+				projectRoot: root,
+				runCommand: () => ({
+					error: Object.assign(new Error("spawn codex ENOENT"), { code: "ENOENT" }),
+					status: null,
+					stdout: "",
+					stderr: "",
+				}),
+			})
+
+			expect(first.project.status).toBe("created")
+			expect(second.project.status).toBe("exists")
+			expect(second.policy.status).toBe("exists")
+			expect(second.agents.status).toBe("exists")
+			expect(second.codex).toMatchObject({
+				status: "unavailable",
+				command: "codex",
+			})
+		} finally {
+			rmSync(root, { recursive: true, force: true })
+		}
 	})
 
 	it("stores, redacts, and clears local auth sessions", () => {

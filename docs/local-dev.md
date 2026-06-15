@@ -123,6 +123,31 @@ Expected result: the fixture test passes, `logs.txt` contains the Node test
 output, `diff.patch` is empty for the clean fixture, and
 `changed-files.txt` is empty.
 
+## Codex MCP Smoke Test
+
+Use the Codex MCP smoke script when you want to manually verify the Codex CLI can
+see sandhost as an MCP server:
+
+```bash
+pnpm codex:mcp-smoke
+```
+
+By default this builds the local CLI, creates a temporary project, uses an
+isolated `HOME`/`CODEX_HOME`, runs `sandhost init --codex`, and checks
+`codex mcp list` for `sandhost`.
+
+For interactive `/mcp` inspection, keep the temporary project/config:
+
+```bash
+pnpm codex:mcp-smoke -- --keep
+```
+
+To install the MCP entry into your real Codex config for normal manual testing:
+
+```bash
+pnpm codex:mcp-smoke -- --real-codex-home --keep
+```
+
 ## Current Check Notes
 
 `pnpm check` runs format, lint, typecheck, and tests. At the time these docs were

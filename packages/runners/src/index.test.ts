@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process"
-import { cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -7,15 +7,21 @@ import { promisify } from "node:util"
 
 import { afterEach, describe, expect, it } from "vitest"
 
-import { defaultSandoPolicy } from "@sando/shared"
+import { asId, defaultSandoPolicy, ok } from "@sando/shared"
+import type { ArtifactBundle, SandboxHandle, SandboxRuntime } from "@sando/runtimes"
 
 import {
+	artifactIdForRunArtifact,
 	compileEffectivePolicy,
 	filterSensitiveArchiveFiles,
 	findProjectRoot,
 	isSensitiveArchiveFilePath,
 	loadProjectPolicy,
 	projectPolicyFilePath,
+	readRunArtifact,
+	readRunDiff,
+	readRunLogs,
+	runProjectCommand,
 	selectArchiveFiles,
 } from "./index.js"
 
@@ -595,6 +601,167 @@ describe("integration fixture repo", () => {
 	})
 })
 
+describe("runProjectCommand", () => {
+	it("runs a project command through an injected runtime and returns MCP refs", async () => {
+		const root = await fixtureGitProject()
+		await addFixtureWorkingTreeFiles(root)
+		const runId = "run_test"
+		const artifactRoot = join(await tempProject(), "artifacts")
+		const artifacts = await writeRunArtifactBundle(artifactRoot)
+		const calls: string[] = []
+		const runtime: SandboxRuntime = {
+			kind: "podman",
+			createSandbox: async (input) => {
+				calls.push("create")
+				expect(input).toMatchObject({
+					runId: asId("run", runId),
+					template: "node-ts",
+					runtime: "podman",
+					network: "none",
+					resources: {
+						cpu: 1,
+						memoryMb: 512,
+					},
+					timeoutSeconds: 120,
+				})
+
+				return ok({
+					id: "sandbox-id",
+					runtime: "podman",
+					runId: input.runId,
+					metadata: {
+						name: "sandhost-run-run_test",
+					},
+				})
+			},
+			uploadWorkspace: async (_handle, archive) => {
+				calls.push("upload")
+				await expect(readFile(join(archive.path, "README.md"), "utf8")).resolves.toContain(
+					"runner integration tests",
+				)
+				await expect(readFile(join(archive.path, "notes", "todo.md"), "utf8")).resolves.toBe(
+					"safe untracked note\n",
+				)
+				await expect(readFile(join(archive.path, ".env"), "utf8")).rejects.toMatchObject({
+					code: "ENOENT",
+				})
+				return ok(undefined)
+			},
+			runCommand: async (_handle, command) => {
+				calls.push("run")
+				expect(command).toEqual({
+					command: "pnpm test",
+					timeoutSeconds: 120,
+				})
+				return ok({
+					status: "succeeded",
+					exitCode: 0,
+					stdout: "ok\n",
+					stderr: "",
+					logs: "ok\n",
+					startedAt: "2026-06-15T00:00:00.000Z",
+					finishedAt: "2026-06-15T00:00:01.250Z",
+					durationMs: 1250,
+				})
+			},
+			collectArtifacts: async () => {
+				calls.push("collect")
+				return ok(artifacts)
+			},
+			destroySandbox: async (handle: SandboxHandle) => {
+				calls.push(`destroy:${handle.id}`)
+				return ok(undefined)
+			},
+		}
+
+		const result = await runProjectCommand(
+			{
+				command: "pnpm test",
+			},
+			{
+				projectRoot: root,
+				runId,
+				runtime,
+			},
+		)
+
+		expect(result.ok).toBe(true)
+		if (!result.ok) {
+			return
+		}
+
+		expect(result.value).toMatchObject({
+			runId,
+			status: "succeeded",
+			exitCode: 0,
+			durationMs: 1250,
+			command: "pnpm test",
+			network: "none",
+			summary: "Command succeeded: pnpm test",
+			logsRef: "sandhost://runs/run_test/logs",
+			diffRef: "sandhost://runs/run_test/diff",
+			auditRef: "sandhost://runs/run_test/audit",
+		})
+		expect(result.value.artifacts).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					id: artifactIdForRunArtifact(runId, "logs.txt"),
+					name: "logs.txt",
+					uri: `sandhost://artifacts/${artifactIdForRunArtifact(runId, "logs.txt")}`,
+				}),
+				expect.objectContaining({
+					id: artifactIdForRunArtifact(runId, "diff.patch"),
+					name: "diff.patch",
+				}),
+			]),
+		)
+		expect(calls).toEqual(["create", "upload", "run", "collect", "destroy:sandbox-id"])
+	})
+
+	it("reads local logs, diffs, and artifacts by generated artifact ID", async () => {
+		const runsRoot = await tempProject()
+		const runRoot = join(runsRoot, "run_read")
+		await writeRunArtifactBundle(runRoot)
+
+		await expect(readRunLogs({ runId: "run_read", runsRootPath: runsRoot })).resolves.toEqual({
+			ok: true,
+			value: "logs\n",
+		})
+		await expect(readRunDiff({ runId: "run_read", runsRootPath: runsRoot })).resolves.toEqual({
+			ok: true,
+			value: "diff\n",
+		})
+		await expect(
+			readRunArtifact({
+				artifactId: artifactIdForRunArtifact("run_read", "logs.txt"),
+				runsRootPath: runsRoot,
+			}),
+		).resolves.toMatchObject({
+			ok: true,
+			value: {
+				artifact: {
+					name: "logs.txt",
+				},
+				content: "logs\n",
+			},
+		})
+		await expect(
+			readRunArtifact({
+				artifactId: artifactIdForRunArtifact("run_read", "coverage/report.txt"),
+				runsRootPath: runsRoot,
+			}),
+		).resolves.toMatchObject({
+			ok: true,
+			value: {
+				artifact: {
+					name: "coverage/report.txt",
+				},
+				content: "coverage\n",
+			},
+		})
+	})
+})
+
 describe("hardcoded sensitive file exclusions", () => {
 	it("matches common secret-bearing archive paths", () => {
 		expect(isSensitiveArchiveFilePath(".env")).toBe(true)
@@ -664,6 +831,78 @@ async function addFixtureWorkingTreeFiles(root: string): Promise<void> {
 	await writeFile(join(root, "node_modules", ".cache", "entry"), "ignored dependency cache\n")
 	await writeFile(join(root, ".sandhost", "runs", "run_fixture", "result.json"), "{}\n")
 	await writeFile(join(root, "debug.log"), "ignored log\n")
+}
+
+async function writeRunArtifactBundle(rootPath: string): Promise<ArtifactBundle> {
+	await mkdir(rootPath, { recursive: true })
+	const logsPath = join(rootPath, "logs.txt")
+	const stdoutPath = join(rootPath, "stdout.txt")
+	const stderrPath = join(rootPath, "stderr.txt")
+	const diffPath = join(rootPath, "diff.patch")
+	const changedFilesPath = join(rootPath, "changed-files.txt")
+	const coveragePath = join(rootPath, "coverage", "report.txt")
+	const resultPath = join(rootPath, "result.json")
+
+	await mkdir(dirname(coveragePath), { recursive: true })
+	await writeFile(logsPath, "logs\n")
+	await writeFile(stdoutPath, "out\n")
+	await writeFile(stderrPath, "")
+	await writeFile(diffPath, "diff\n")
+	await writeFile(changedFilesPath, "")
+	await writeFile(coveragePath, "coverage\n")
+	await writeFile(resultPath, "{}\n")
+
+	return {
+		rootPath,
+		logsPath,
+		diffPath,
+		changedFilesPath,
+		resultPath,
+		artifacts: [
+			{
+				name: "changed-files.txt",
+				path: changedFilesPath,
+				contentType: "text/plain",
+				sizeBytes: 0,
+			},
+			{
+				name: "coverage/report.txt",
+				path: coveragePath,
+				contentType: "text/plain",
+				sizeBytes: 9,
+			},
+			{
+				name: "diff.patch",
+				path: diffPath,
+				contentType: "text/plain",
+				sizeBytes: 5,
+			},
+			{
+				name: "logs.txt",
+				path: logsPath,
+				contentType: "text/plain",
+				sizeBytes: 5,
+			},
+			{
+				name: "result.json",
+				path: resultPath,
+				contentType: "application/json",
+				sizeBytes: 3,
+			},
+			{
+				name: "stderr.txt",
+				path: stderrPath,
+				contentType: "text/plain",
+				sizeBytes: 0,
+			},
+			{
+				name: "stdout.txt",
+				path: stdoutPath,
+				contentType: "text/plain",
+				sizeBytes: 4,
+			},
+		],
+	}
 }
 
 async function writePolicy(root: string, policy: unknown): Promise<void> {

@@ -9,6 +9,7 @@
 		"format": "oxfmt --write .",
 		"format:check": "oxfmt --check .",
 		"lint": "oxlint .",
+		"codex:mcp-smoke": "node scripts/sandhost-codex-mcp-smoke.mjs",
 		"local:doctor": "node scripts/sandhost-local.mjs doctor",
 		"local:smoke": "node scripts/sandhost-local.mjs smoke-node-ts",
 		"test": "vitest run --passWithNoTests",
