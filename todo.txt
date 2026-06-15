@@ -64,7 +64,7 @@
 -[x] Add AGENTS.md insertion/update
 -[x] Add mcp smoke test script
 -[x] Add sandhost doctor checks for Codex MCP config
-Phase 5 — Agent Auth grants | target: Codex path requires scoped hosted approval before execution.
+[ ] Phase 5 — Agent Auth grants | target: Codex path requires scoped hosted approval before execution.
 -[ ] Implement BetterAuthAgentAuthority adapter
 -[ ] Expose /.well-known/agent-configuration
 -[ ] Define MVP capability registry
