@@ -47,3 +47,20 @@
 -[x] Add API route: list run artifacts
 -[x] Implement @sandhost/cli | give it basic functionality. Do NOT worry about keeping parity with the test scripts
 -[x] Store local auth session securely enough for MVP | .env is fine for the MVP
+[ ] Phase 3 — Codex MCP integration | Codex currently supports MCP config via config.toml, and the CLI can manage MCP server entries with codex mcp add. Use that instead of hand-editing config unless it fails in diagnostics.
+-[ ] Implement @sandhost/mcp stdio server | Feel free to install pnpm dependencies if it's sensible to do so
+-[ ] Expose sandhost_run_project_command
+-[ ] Expose sandhost_list_templates
+-[ ] Expose sandhost_explain_policy
+-[ ] Expose sandhost_get_run
+-[ ] Expose sandhost_read_logs
+-[ ] Expose sandhost_get_diff
+-[ ] Expose sandhost_download_artifact
+-[ ] Implement sandhost mcp command
+-[ ] Implement sandhost init --codex
+-[ ] Use codex mcp add sandhost -- npx -y @sandhost/cli mcp where possible
+-[ ] Add project .sandhost/project.json
+-[ ] Add project .sandhost/policy.json
+-[ ] Add AGENTS.md insertion/update
+-[ ] Add mcp smoke test script
+-[ ] Add sandhost doctor checks for Codex MCP config
