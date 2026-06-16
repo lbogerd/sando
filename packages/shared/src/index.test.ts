@@ -1,14 +1,21 @@
 import { describe, expect, it } from "vitest"
 
 import {
+	agentKinds,
 	auditEventTypes,
 	asId,
+	capabilitySchema,
 	defaultSandoPolicy,
 	err,
+	grantScopes,
+	grantStatuses,
 	isAppendAuditEventInput,
 	isAppendAuditEventResult,
 	isAuditEventRecord,
 	isArtifactRecord,
+	isAuthorizeGrantInput,
+	isAuthorizeGrantResult,
+	isGrantRecord,
 	hostPlatforms,
 	isCreateRunInput,
 	isCreateRunResult,
@@ -21,12 +28,17 @@ import {
 	isHostRegistrationResult,
 	isRegisterHostInput,
 	isRegisterProjectInput,
+	isRequestGrantInput,
+	isRequestGrantResult,
 	isRunProjectCommandInput,
 	isRunProjectCommandResult,
 	isListRunArtifactsResult,
 	isRunRecord,
 	isSandoPolicy,
 	ok,
+	parseAuthorizeGrantInput,
+	parseAuthorizeGrantResult,
+	parseGrantRecord,
 	parseAppendAuditEventInput,
 	parseAppendAuditEventResult,
 	parseAuditEventRecord,
@@ -41,12 +53,16 @@ import {
 	parseProjectRegistrationResult,
 	parseRegisterHostInput,
 	parseRegisterProjectInput,
+	parseRequestGrantInput,
+	parseRequestGrantResult,
 	parseRunProjectCommandInput,
 	parseRunProjectCommandResult,
 	parseListRunArtifactsResult,
 	parseRunRecord,
 	parseSandoPolicy,
+	runProjectCommandHash,
 	runStatuses,
+	sandboxCapabilities,
 	sandoError,
 	type ProjectId,
 	type Result,
@@ -213,6 +229,148 @@ describe("run project command schemas", () => {
 					{ path: "$.logsRef", message: "Expected a sandhost URI." },
 					{ path: "$.artifacts[0].name", message: "Expected a non-empty string." },
 					{ path: "$.artifacts[0].uri", message: "Expected a sandhost URI." },
+				],
+			})
+		}
+	})
+})
+
+describe("grant schemas", () => {
+	const constraints = {
+		command: "pnpm test",
+		commandHash: runProjectCommandHash({
+			command: "pnpm test",
+			template: "node-ts",
+			runtime: "podman",
+			network: "none",
+			timeoutSeconds: 120,
+		}),
+		maxTimeoutSeconds: 600,
+		network: "none",
+		runtime: "podman",
+		template: "node-ts",
+		timeoutSeconds: 120,
+	}
+	const grant = {
+		id: "grant_123",
+		userId: "user_123",
+		projectId: "proj_123",
+		hostId: "host_123",
+		agentId: "agent_123",
+		capabilities: ["sandbox.run_project_command"],
+		constraints,
+		scope: "one_shot",
+		status: "approved",
+		createdAt: "2026-06-14T17:30:00.000Z",
+		expiresAt: "2026-06-14T17:40:00.000Z",
+		approvedAt: "2026-06-14T17:31:00.000Z",
+	}
+
+	it("exports the MVP agent, capability, and grant vocabulary", () => {
+		expect(agentKinds).toEqual(["codex"])
+		expect(sandboxCapabilities).toContain("sandbox.run_project_command")
+		expect(capabilitySchema.safeParse("sandbox.run_project_command").success).toBe(true)
+		expect(grantScopes).toEqual(["one_shot", "project_window"])
+		expect(grantStatuses).toEqual(["pending", "approved", "denied", "expired", "revoked"])
+	})
+
+	it("hashes command execution shape deterministically", () => {
+		const first = runProjectCommandHash({
+			command: "pnpm test",
+			template: "node-ts",
+			runtime: "podman",
+			network: "none",
+			timeoutSeconds: 120,
+		})
+		const sameShape = runProjectCommandHash({
+			timeoutSeconds: 120,
+			network: "none",
+			runtime: "podman",
+			template: "node-ts",
+			command: "pnpm test",
+		})
+		const differentCommand = runProjectCommandHash({
+			command: "pnpm build",
+			template: "node-ts",
+			runtime: "podman",
+			network: "none",
+			timeoutSeconds: 120,
+		})
+
+		expect(first).toMatch(/^sha256:[a-f0-9]{64}$/u)
+		expect(sameShape).toBe(first)
+		expect(differentCommand).not.toBe(first)
+	})
+
+	it("accepts valid grant records and request/authorization payloads", () => {
+		const request = {
+			projectId: "proj_123",
+			hostId: "host_123",
+			agentId: "agent_123",
+			capability: "sandbox.run_project_command",
+			constraints,
+		}
+		const requestResult = {
+			grant,
+			approvalUrl: "https://sandhost.example/v1/grants/grant_123/approval",
+			created: true,
+		}
+		const authorizeResult = {
+			grant,
+			authorized: true,
+		}
+
+		expect(parseGrantRecord(grant)).toEqual({ ok: true, value: grant })
+		expect(isGrantRecord(grant)).toBe(true)
+		expect(parseRequestGrantInput(request)).toEqual({ ok: true, value: request })
+		expect(isRequestGrantInput(request)).toBe(true)
+		expect(parseRequestGrantResult(requestResult)).toEqual({
+			ok: true,
+			value: requestResult,
+		})
+		expect(isRequestGrantResult(requestResult)).toBe(true)
+		expect(parseAuthorizeGrantInput(request)).toEqual({ ok: true, value: request })
+		expect(isAuthorizeGrantInput(request)).toBe(true)
+		expect(parseAuthorizeGrantResult(authorizeResult)).toEqual({
+			ok: true,
+			value: authorizeResult,
+		})
+		expect(isAuthorizeGrantResult(authorizeResult)).toBe(true)
+	})
+
+	it("rejects invalid grant request payloads", () => {
+		const result = parseRequestGrantInput({
+			projectId: "run_123",
+			hostId: "proj_123",
+			agentId: "host_123",
+			capability: "sandbox.deploy",
+			constraints: {
+				command: "",
+				commandHash: "nope",
+				maxTimeoutSeconds: 0,
+				network: "private",
+				runtime: "vm",
+				template: "",
+				timeoutSeconds: 0,
+			},
+		})
+
+		expect(result.ok).toBe(false)
+		if (!result.ok) {
+			expect(result.error.code).toBe("VALIDATION_FAILED")
+			expect(result.error.details).toEqual({
+				issues: [
+					{ path: "$.projectId", message: "Expected a project ID." },
+					{ path: "$.hostId", message: "Expected a host ID." },
+					{ path: "$.agentId", message: "Expected an agent ID." },
+					{ path: "$.capability", message: "Expected a supported sandhost capability." },
+					{ path: "$.constraints.command", message: "Expected a non-empty string." },
+					{ path: "$.constraints.commandHash", message: "Expected a SHA-256 command hash." },
+					{ path: "$.constraints.maxTimeoutSeconds", message: "Expected a positive integer." },
+					{ path: "$.constraints.network", message: "Expected a supported network mode." },
+					{ path: "$.constraints.runtime", message: "Expected a supported sandbox runtime." },
+					{ path: "$.constraints.template", message: "Expected a non-empty string." },
+					{ path: "$.constraints.timeoutSeconds", message: "Expected a positive integer." },
 				],
 			})
 		}

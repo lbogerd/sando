@@ -80,6 +80,8 @@ describe("sandhost dev script", () => {
 			DATABASE_URL: "postgresql://custom",
 			HOST: "0.0.0.0",
 			PORT: "4000",
+			SANDHOST_DEV_AUTH_TOKEN: "sandhost-dev-token",
+			SANDHOST_DEV_USER_ID: "user_dev",
 			TMPDIR: "/tmp",
 		})
 	})
@@ -107,6 +109,7 @@ describe("sandhost dev script", () => {
 
 	it("prints root pnpm dev usage", () => {
 		expect(helpText()).toContain("pnpm dev")
+		expect(helpText()).toContain("Authorization: Bearer sandhost-dev-token")
 		expect(helpText()).toContain("--skip-podman")
 	})
 })

@@ -3,7 +3,11 @@ import { Hono } from "hono"
 import { pathToFileURL } from "node:url"
 
 import { authBasePath, type SandhostAuth } from "@sando/auth"
-import { runProjectCommandInputMetadata, sandoPolicyMetadata } from "@sando/shared"
+import {
+	runProjectCommandInputMetadata,
+	sandboxCapabilities,
+	sandoPolicyMetadata,
+} from "@sando/shared"
 
 import {
 	createAuditEventRoutes,
@@ -15,7 +19,8 @@ import {
 	createMemoryArtifactRepository,
 	type ArtifactRepository,
 } from "./artifacts.js"
-import type { CurrentUserResolver } from "./current-user.js"
+import { currentUserResolverFromEnv, type CurrentUserResolver } from "./current-user.js"
+import { createGrantRoutes, createMemoryGrantRepository, type GrantRepository } from "./grants.js"
 import { createHostRoutes, createMemoryHostRepository, type HostRepository } from "./hosts.js"
 import {
 	createMemoryProjectRepository,
@@ -33,6 +38,7 @@ export type HostedAppOptions = {
 	readonly auditEventRepository?: AuditEventRepository
 	readonly artifactRepository?: ArtifactRepository
 	readonly currentUser?: CurrentUserResolver
+	readonly grantRepository?: GrantRepository
 	readonly hostRepository?: HostRepository
 	readonly projectRepository?: ProjectRepository
 	readonly runRepository?: RunRepository
@@ -47,7 +53,8 @@ export function createHostedApp(options: HostedAppOptions = {}): Hono {
 	const now = options.now ?? (() => new Date())
 	const auditEventRepository = options.auditEventRepository ?? createMemoryAuditEventRepository()
 	const artifactRepository = options.artifactRepository ?? createMemoryArtifactRepository()
-	const currentUser = options.currentUser ?? (() => null)
+	const currentUser = options.currentUser ?? currentUserResolverFromEnv()
+	const grantRepository = options.grantRepository ?? createMemoryGrantRepository()
 	const hostRepository = options.hostRepository ?? createMemoryHostRepository()
 	const projectRepository = options.projectRepository ?? createMemoryProjectRepository()
 	const runRepository = options.runRepository ?? createMemoryRunRepository()
@@ -73,6 +80,17 @@ export function createHostedApp(options: HostedAppOptions = {}): Hono {
 			checkedAt: now().toISOString(),
 		}),
 	)
+
+	app.get("/.well-known/agent-configuration", (context) => {
+		const origin = new URL(context.req.url).origin
+
+		return context.json({
+			issuer: origin,
+			capabilities: sandboxCapabilities,
+			grantRequestEndpoint: `${origin}/${apiVersion}/grants/request`,
+			grantAuthorizationEndpoint: `${origin}/${apiVersion}/grants/authorize`,
+		})
+	})
 
 	const v1 = new Hono()
 
@@ -115,6 +133,15 @@ export function createHostedApp(options: HostedAppOptions = {}): Hono {
 			currentUser,
 			now,
 			runRepository,
+		}),
+	)
+	v1.route(
+		"/",
+		createGrantRoutes({
+			auditEventRepository,
+			currentUser,
+			grantRepository,
+			now,
 		}),
 	)
 	v1.route(
@@ -179,6 +206,7 @@ export function serveHostedApp(options: HostedServerOptions = {}): ServerType {
 			? {}
 			: { artifactRepository: options.artifactRepository }),
 		...(options.currentUser === undefined ? {} : { currentUser: options.currentUser }),
+		...(options.grantRepository === undefined ? {} : { grantRepository: options.grantRepository }),
 		...(options.hostRepository === undefined ? {} : { hostRepository: options.hostRepository }),
 		...(options.projectRepository === undefined
 			? {}

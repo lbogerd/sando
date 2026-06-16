@@ -7,10 +7,20 @@ import { promisify } from "node:util"
 
 import { afterEach, describe, expect, it } from "vitest"
 
-import { asId, defaultSandoPolicy, ok } from "@sando/shared"
+import {
+	asId,
+	defaultSandoPolicy,
+	err,
+	ok,
+	runProjectCommandHash,
+	sandoError,
+	type CommandHash,
+	type GrantRecord,
+} from "@sando/shared"
 import type { ArtifactBundle, SandboxHandle, SandboxRuntime } from "@sando/runtimes"
 
 import {
+	type AgentAuthority,
 	artifactIdForRunArtifact,
 	compileEffectivePolicy,
 	filterSensitiveArchiveFiles,
@@ -718,6 +728,97 @@ describe("runProjectCommand", () => {
 		expect(calls).toEqual(["create", "upload", "run", "collect", "destroy:sandbox-id"])
 	})
 
+	it("requires hosted authority before local sandbox execution when configured", async () => {
+		const root = await fixtureGitProject()
+		await addFixtureWorkingTreeFiles(root)
+		const seen: unknown[] = []
+		const authority: AgentAuthority = {
+			async ensureCapability(input) {
+				seen.push(input)
+				return ok({
+					grant: grantRecord(input.commandHash),
+				})
+			},
+		}
+		const artifactRoot = join(await tempProject(), "artifacts")
+		const artifacts = await writeRunArtifactBundle(artifactRoot)
+		const calls: string[] = []
+		const runtime = fakeRuntime(calls, artifacts)
+
+		const result = await runProjectCommand(
+			{
+				command: "pnpm test",
+				timeoutSeconds: 90,
+			},
+			{
+				authority,
+				projectRoot: root,
+				runId: "run_authorized",
+				runtime,
+			},
+		)
+
+		expect(result.ok).toBe(true)
+		expect(seen).toEqual([
+			{
+				capability: "sandbox.run_project_command",
+				command: "pnpm test",
+				commandHash: runProjectCommandHash({
+					command: "pnpm test",
+					template: "node-ts",
+					runtime: "podman",
+					network: "none",
+					timeoutSeconds: 90,
+				}),
+				maxTimeoutSeconds: 120,
+				network: "none",
+				runtime: "podman",
+				template: "node-ts",
+				timeoutSeconds: 90,
+			},
+		])
+		expect(calls).toEqual(["create", "upload", "run", "collect", "destroy:sandbox-id"])
+	})
+
+	it("does not execute locally when hosted authority denies the capability", async () => {
+		const root = await fixtureGitProject()
+		await addFixtureWorkingTreeFiles(root)
+		const authority: AgentAuthority = {
+			async ensureCapability() {
+				return err(
+					sandoError({
+						code: "GRANT_DENIED",
+						message: "Grant was denied.",
+					}),
+				)
+			},
+		}
+		const calls: string[] = []
+		const runtime = fakeRuntime(
+			calls,
+			await writeRunArtifactBundle(join(await tempProject(), "artifacts")),
+		)
+
+		const result = await runProjectCommand(
+			{
+				command: "pnpm test",
+			},
+			{
+				authority,
+				projectRoot: root,
+				runId: "run_denied",
+				runtime,
+			},
+		)
+
+		expect(result.ok).toBe(false)
+		if (!result.ok) {
+			expect(result.error.code).toBe("GRANT_DENIED")
+			expect(result.error.message).toBe("Grant was denied.")
+		}
+		expect(calls).toEqual([])
+	})
+
 	it("reads local logs, diffs, and artifacts by generated artifact ID", async () => {
 		const runsRoot = await tempProject()
 		const runRoot = join(runsRoot, "run_read")
@@ -831,6 +932,74 @@ async function addFixtureWorkingTreeFiles(root: string): Promise<void> {
 	await writeFile(join(root, "node_modules", ".cache", "entry"), "ignored dependency cache\n")
 	await writeFile(join(root, ".sandhost", "runs", "run_fixture", "result.json"), "{}\n")
 	await writeFile(join(root, "debug.log"), "ignored log\n")
+}
+
+function fakeRuntime(calls: string[], artifacts: ArtifactBundle): SandboxRuntime {
+	return {
+		kind: "podman",
+		createSandbox: async (input) => {
+			calls.push("create")
+
+			return ok({
+				id: "sandbox-id",
+				runtime: "podman",
+				runId: input.runId,
+				metadata: {
+					name: `sandhost-run-${input.runId}`,
+				},
+			})
+		},
+		uploadWorkspace: async () => {
+			calls.push("upload")
+			return ok(undefined)
+		},
+		runCommand: async () => {
+			calls.push("run")
+			return ok({
+				status: "succeeded",
+				exitCode: 0,
+				stdout: "ok\n",
+				stderr: "",
+				logs: "ok\n",
+				startedAt: "2026-06-15T00:00:00.000Z",
+				finishedAt: "2026-06-15T00:00:01.250Z",
+				durationMs: 1250,
+			})
+		},
+		collectArtifacts: async () => {
+			calls.push("collect")
+			return ok(artifacts)
+		},
+		destroySandbox: async (handle) => {
+			calls.push(`destroy:${handle.id}`)
+			return ok(undefined)
+		},
+	}
+}
+
+function grantRecord(commandHash: string): GrantRecord {
+	return {
+		id: asId("grant", "grant_authorized"),
+		userId: asId("user", "user_123"),
+		projectId: asId("project", "proj_123"),
+		hostId: asId("host", "host_123"),
+		agentId: asId("agent", "agent_123"),
+		capabilities: ["sandbox.run_project_command"],
+		constraints: {
+			command: "pnpm test",
+			commandHash: commandHash as CommandHash,
+			maxTimeoutSeconds: 120,
+			network: "none",
+			runtime: "podman",
+			template: "node-ts",
+			timeoutSeconds: 90,
+		},
+		scope: "one_shot",
+		status: "approved",
+		createdAt: "2026-06-14T17:30:00.000Z",
+		expiresAt: "2026-06-14T17:40:00.000Z",
+		approvedAt: "2026-06-14T17:31:00.000Z",
+	}
 }
 
 async function writeRunArtifactBundle(rootPath: string): Promise<ArtifactBundle> {

@@ -33,6 +33,20 @@ describe("hosted API app", () => {
 		})
 	})
 
+	it("exposes Agent Auth discovery metadata", async () => {
+		const app = createHostedApp()
+
+		const response = await app.request("/.well-known/agent-configuration")
+
+		expect(response.status).toBe(200)
+		expect(await response.json()).toMatchObject({
+			issuer: "http://localhost",
+			capabilities: expect.arrayContaining(["sandbox.run_project_command"]),
+			grantRequestEndpoint: "http://localhost/v1/grants/request",
+			grantAuthorizationEndpoint: "http://localhost/v1/grants/authorize",
+		})
+	})
+
 	it("exposes versioned control-plane status metadata", async () => {
 		const app = createHostedApp()
 

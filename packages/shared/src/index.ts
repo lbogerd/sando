@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto"
+
 import { z } from "zod"
 
 export const packageName = "shared"
@@ -135,6 +137,45 @@ export const hostPlatformSchema = z.enum(hostPlatforms, {
 })
 
 export type HostPlatform = z.infer<typeof hostPlatformSchema>
+
+export const agentKinds = ["codex"] as const
+
+export const agentKindSchema = z.enum(agentKinds, {
+	error: "Expected a supported agent kind.",
+})
+
+export type AgentKind = z.infer<typeof agentKindSchema>
+
+export const sandboxCapabilities = [
+	"sandbox.list_templates",
+	"sandbox.explain_policy",
+	"sandbox.run_project_command",
+	"sandbox.read_logs",
+	"sandbox.get_diff",
+	"sandbox.download_artifact",
+] as const
+
+export const capabilitySchema = z.enum(sandboxCapabilities, {
+	error: "Expected a supported sandhost capability.",
+})
+
+export type Capability = z.infer<typeof capabilitySchema>
+
+export const grantScopes = ["one_shot", "project_window"] as const
+
+export const grantScopeSchema = z.enum(grantScopes, {
+	error: "Expected a supported grant scope.",
+})
+
+export type GrantScope = z.infer<typeof grantScopeSchema>
+
+export const grantStatuses = ["pending", "approved", "denied", "expired", "revoked"] as const
+
+export const grantStatusSchema = z.enum(grantStatuses, {
+	error: "Expected a supported grant status.",
+})
+
+export type GrantStatus = z.infer<typeof grantStatusSchema>
 
 export const auditEventTypes = [
 	"agent.registered",
@@ -301,6 +342,189 @@ export function parseRunProjectCommandInput(value: unknown): Result<RunProjectCo
 
 export function isRunProjectCommandInput(value: unknown): value is RunProjectCommandInput {
 	return parseRunProjectCommandInput(value).ok
+}
+
+export const commandHashSchema = z
+	.string()
+	.regex(/^sha256:[a-f0-9]{64}$/u, "Expected a SHA-256 command hash.")
+
+export type CommandHash = z.infer<typeof commandHashSchema>
+
+export const runProjectCommandGrantShapeSchema = z.object({
+	command: nonEmptyStringSchema,
+	template: nonEmptyStringSchema,
+	runtime: sandboxRuntimeKindSchema,
+	network: networkModeSchema,
+	timeoutSeconds: positiveIntegerSchema,
+})
+
+export type RunProjectCommandGrantShape = z.infer<typeof runProjectCommandGrantShapeSchema>
+
+export const grantConstraintsSchema = z.object({
+	command: nonEmptyStringSchema,
+	commandHash: commandHashSchema,
+	maxTimeoutSeconds: positiveIntegerSchema,
+	network: networkModeSchema,
+	runtime: sandboxRuntimeKindSchema,
+	template: nonEmptyStringSchema,
+	timeoutSeconds: positiveIntegerSchema,
+})
+
+export type GrantConstraints = z.infer<typeof grantConstraintsSchema>
+
+export const grantRecordSchema = z.object({
+	id: idSchema("grant", "Expected a grant ID."),
+	userId: idSchema("user", "Expected a user ID."),
+	projectId: idSchema("project", "Expected a project ID."),
+	hostId: idSchema("host", "Expected a host ID."),
+	agentId: idSchema("agent", "Expected an agent ID."),
+	capabilities: z.array(capabilitySchema).min(1, "Expected at least one capability."),
+	constraints: grantConstraintsSchema,
+	scope: grantScopeSchema,
+	status: grantStatusSchema,
+	createdAt: nonEmptyStringSchema,
+	expiresAt: nonEmptyStringSchema.optional(),
+	approvedAt: nonEmptyStringSchema.optional(),
+})
+
+export type GrantRecord = z.infer<typeof grantRecordSchema>
+
+export const requestGrantInputSchema = z.object({
+	projectId: idSchema("project", "Expected a project ID."),
+	hostId: idSchema("host", "Expected a host ID."),
+	agentId: idSchema("agent", "Expected an agent ID."),
+	capability: capabilitySchema,
+	constraints: grantConstraintsSchema,
+})
+
+export type RequestGrantInput = z.infer<typeof requestGrantInputSchema>
+
+export const requestGrantResultSchema = z.object({
+	grant: grantRecordSchema,
+	approvalUrl: nonEmptyStringSchema,
+	created: z.boolean(),
+})
+
+export type RequestGrantResult = z.infer<typeof requestGrantResultSchema>
+
+export const approveGrantInputSchema = z.object({
+	scope: grantScopeSchema,
+})
+
+export type ApproveGrantInput = z.infer<typeof approveGrantInputSchema>
+
+export const authorizeGrantInputSchema = requestGrantInputSchema.extend({
+	grantId: idSchema("grant", "Expected a grant ID.").optional(),
+})
+
+export type AuthorizeGrantInput = z.infer<typeof authorizeGrantInputSchema>
+
+export const authorizeGrantResultSchema = z.object({
+	grant: grantRecordSchema,
+	authorized: z.literal(true),
+})
+
+export type AuthorizeGrantResult = z.infer<typeof authorizeGrantResultSchema>
+
+export const agentConfigurationResultSchema = z.object({
+	issuer: nonEmptyStringSchema,
+	capabilities: z.array(capabilitySchema),
+	grantRequestEndpoint: nonEmptyStringSchema,
+	grantAuthorizationEndpoint: nonEmptyStringSchema,
+})
+
+export type AgentConfigurationResult = z.infer<typeof agentConfigurationResultSchema>
+
+export function runProjectCommandHash(input: RunProjectCommandGrantShape): CommandHash {
+	const value = runProjectCommandGrantShapeSchema.parse(input)
+	const canonical = canonicalJson(value)
+	const digest = createHash("sha256").update(canonical).digest("hex")
+
+	return `sha256:${digest}` as CommandHash
+}
+
+export function parseGrantRecord(value: unknown): Result<GrantRecord> {
+	const result = grantRecordSchema.safeParse(value)
+
+	if (!result.success) {
+		return err(validationError("Invalid grant record.", result.error))
+	}
+
+	return ok(result.data)
+}
+
+export function isGrantRecord(value: unknown): value is GrantRecord {
+	return parseGrantRecord(value).ok
+}
+
+export function parseRequestGrantInput(value: unknown): Result<RequestGrantInput> {
+	const result = requestGrantInputSchema.safeParse(value)
+
+	if (!result.success) {
+		return err(validationError("Invalid request grant input.", result.error))
+	}
+
+	return ok(result.data)
+}
+
+export function isRequestGrantInput(value: unknown): value is RequestGrantInput {
+	return parseRequestGrantInput(value).ok
+}
+
+export function parseRequestGrantResult(value: unknown): Result<RequestGrantResult> {
+	const result = requestGrantResultSchema.safeParse(value)
+
+	if (!result.success) {
+		return err(validationError("Invalid request grant result.", result.error))
+	}
+
+	return ok(result.data)
+}
+
+export function isRequestGrantResult(value: unknown): value is RequestGrantResult {
+	return parseRequestGrantResult(value).ok
+}
+
+export function parseApproveGrantInput(value: unknown): Result<ApproveGrantInput> {
+	const result = approveGrantInputSchema.safeParse(value)
+
+	if (!result.success) {
+		return err(validationError("Invalid approve grant input.", result.error))
+	}
+
+	return ok(result.data)
+}
+
+export function isApproveGrantInput(value: unknown): value is ApproveGrantInput {
+	return parseApproveGrantInput(value).ok
+}
+
+export function parseAuthorizeGrantInput(value: unknown): Result<AuthorizeGrantInput> {
+	const result = authorizeGrantInputSchema.safeParse(value)
+
+	if (!result.success) {
+		return err(validationError("Invalid authorize grant input.", result.error))
+	}
+
+	return ok(result.data)
+}
+
+export function isAuthorizeGrantInput(value: unknown): value is AuthorizeGrantInput {
+	return parseAuthorizeGrantInput(value).ok
+}
+
+export function parseAuthorizeGrantResult(value: unknown): Result<AuthorizeGrantResult> {
+	const result = authorizeGrantResultSchema.safeParse(value)
+
+	if (!result.success) {
+		return err(validationError("Invalid authorize grant result.", result.error))
+	}
+
+	return ok(result.data)
+}
+
+export function isAuthorizeGrantResult(value: unknown): value is AuthorizeGrantResult {
+	return parseAuthorizeGrantResult(value).ok
 }
 
 export const runProjectCommandStatuses = ["succeeded", "failed", "cancelled", "timed_out"] as const
@@ -767,6 +991,21 @@ export function parseAppendAuditEventResult(value: unknown): Result<AppendAuditE
 
 export function isAppendAuditEventResult(value: unknown): value is AppendAuditEventResult {
 	return parseAppendAuditEventResult(value).ok
+}
+
+function canonicalJson(value: JsonValue): string {
+	if (Array.isArray(value)) {
+		return `[${value.map((entry) => canonicalJson(entry)).join(",")}]`
+	}
+
+	if (value !== null && typeof value === "object") {
+		return `{${Object.keys(value)
+			.sort()
+			.map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key] ?? null)}`)
+			.join(",")}}`
+	}
+
+	return JSON.stringify(value)
 }
 
 function validationError(message: string, error: z.ZodError): SandoError {

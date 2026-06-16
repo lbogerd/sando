@@ -39,6 +39,88 @@ pnpm --filter @sando/runtimes typecheck
 pnpm test -- packages/shared/src/index.test.ts
 ```
 
+## Hosted Approval Flow
+
+Grant approval is enforced by the runner when a hosted authority is configured.
+For local Codex testing, build the private workspace CLI and register the MCP
+server from the built dist file:
+
+```bash
+pnpm --filter @sando/cli build
+codex mcp add sandhost -- node /home/wub/src/_experiments/sando/apps/cli/dist/index.mjs mcp
+```
+
+Restart Codex after changing MCP config. A session that was already open will
+not suddenly gain the new `sandhost_run_project_command` tool.
+
+The MCP server reads these environment variables when it starts:
+
+```bash
+export SANDHOST_API_URL=http://127.0.0.1:3000
+export SANDHOST_SESSION_TOKEN=sandhost-dev-token
+export SANDHOST_PROJECT_ID=proj_manual
+export SANDHOST_HOST_ID=host_manual
+export SANDHOST_AGENT_ID=agent_codex_manual
+```
+
+Either start Codex from a shell with those variables exported, or include them
+in the MCP command through `env`:
+
+```bash
+codex mcp add sandhost -- env \
+  SANDHOST_API_URL=http://127.0.0.1:3000 \
+  SANDHOST_SESSION_TOKEN=sandhost-dev-token \
+  SANDHOST_PROJECT_ID=proj_manual \
+  SANDHOST_HOST_ID=host_manual \
+  SANDHOST_AGENT_ID=agent_codex_manual \
+  node /home/wub/src/_experiments/sando/apps/cli/dist/index.mjs mcp
+```
+
+With those values present, `sandhost_run_project_command` requests
+`sandbox.run_project_command` before archiving or running the project. The first
+request opens the hosted approval page. `Approve once` authorizes only the exact
+command hash. `Approve for 30 minutes` authorizes compatible commands for the
+same project, host, agent, template, runtime, network, and timeout ceiling.
+`Deny` and expired grants prevent execution.
+
+When you use `pnpm dev -- --skip-podman`, the hosted API runs at
+`http://127.0.0.1:3000` by default. Approval URLs for this flow are created only
+after the MCP server requests a grant, and they use whatever grant ID that
+server generated. Do not open the `grant_manual` URL from the manual script
+against this dev server.
+
+To exercise the browser flow without Podman or Better Auth, run:
+
+```bash
+pnpm approval:manual
+```
+
+The script starts an in-memory hosted API on `http://127.0.0.1:3123`, creates a
+temporary git project, opens the approval URL, waits for your decision, runs a
+fake runtime only after approval, and prints the audit event types. Useful
+variants:
+
+This is a separate one-shot harness. Its `grant_manual` URL only exists while
+`pnpm approval:manual` is running, because that command starts its own in-memory
+API process on port `3123`.
+
+If your WSL environment does not have `wslview` or another browser opener
+installed, the script prints the approval URL and keeps waiting; open that URL
+manually in a browser.
+
+```bash
+pnpm approval:manual -- --command "pnpm build"
+pnpm approval:manual -- --port 3124
+```
+
+Expected approval outcomes:
+
+- `Approve once`: result succeeds, and audit includes `grant.requested`,
+  `grant.approved`, `capability.executed`.
+- `Approve for 30 minutes`: result succeeds; a compatible second request can
+  reuse the same grant until it expires.
+- `Deny`: result returns `GRANT_DENIED` and no fake runtime execution occurs.
+
 ## Local Hosted Stack
 
 Use the root dev script to start the hosted API with a local Postgres database:
@@ -51,6 +133,16 @@ By default this starts a Podman Postgres container named
 `sandhost-postgres`, waits for it to become ready, then starts the Hono API at
 `http://127.0.0.1:3000`. The script injects `DATABASE_URL`, `HOST`, and `PORT`
 for the API process.
+
+For local development, `pnpm dev` also injects:
+
+```bash
+SANDHOST_DEV_AUTH_TOKEN=sandhost-dev-token
+SANDHOST_DEV_USER_ID=user_dev
+```
+
+Use `Authorization: Bearer sandhost-dev-token` for authenticated API calls
+against the in-memory development routes.
 
 The current hosted API still uses in-memory repositories by default; the local
 database is available for auth/persistence wiring as those adapters are added.

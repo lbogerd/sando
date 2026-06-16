@@ -12,6 +12,9 @@ import {
 } from "drizzle-orm/pg-core"
 
 import {
+	agentKinds,
+	grantScopes,
+	grantStatuses,
 	networkModes,
 	runProjectCommandStatuses,
 	sandboxRuntimeKinds,
@@ -24,9 +27,9 @@ export const sandhostSchema = pgSchema(databaseSchemaName)
 export const idColumnLength = 128
 
 export const hostPlatformValues = ["linux-wsl"] as const
-export const agentKindValues = ["codex"] as const
-export const grantScopeValues = ["one_shot", "project_window"] as const
-export const grantStatusValues = ["pending", "approved", "denied", "expired", "revoked"] as const
+export const agentKindValues = agentKinds
+export const grantScopeValues = grantScopes
+export const grantStatusValues = grantStatuses
 export const runStatusValues = ["queued", "running", ...runProjectCommandStatuses] as const
 export const auditEventTypeValues = [
 	"agent.registered",

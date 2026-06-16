@@ -8,6 +8,18 @@ import { promisify } from "node:util"
 import { z } from "zod"
 
 import {
+	type AgentId,
+	type AuthorizeGrantInput,
+	type AuthorizeGrantResult,
+	type GrantRecord,
+	type HostId,
+	type JsonValue,
+	parseAuthorizeGrantResult,
+	parseGrantRecord,
+	parseRequestGrantResult,
+	type ProjectId,
+	type RequestGrantInput,
+	type RequestGrantResult,
 	asId,
 	defaultSandoPolicy,
 	err,
@@ -18,8 +30,10 @@ import {
 	parseSandoPolicy,
 	resourceLimitsSchema,
 	runProjectCommandInputSchema,
+	runProjectCommandHash,
 	sandboxRuntimeKindSchema,
 	sandoError,
+	sandoErrorCodes,
 	sandoPolicySchema,
 	secretPolicySchema,
 	type NetworkMode,
@@ -67,6 +81,7 @@ export const hardcodedSensitiveFileExclusions = {
 } as const
 
 const execFileAsync = promisify(execFile)
+const pendingGrantTtlSeconds = 10 * 60
 
 export const projectRootStrongMarkers = [
 	projectPolicyFilePath,
@@ -128,6 +143,7 @@ export const archiveFileSelectionSchema = z.object({
 export type ArchiveFileSelection = z.infer<typeof archiveFileSelectionSchema>
 
 export const runProjectCommandOptionsSchema = z.object({
+	authority: z.custom<AgentAuthority>().optional(),
 	startPath: z.string().optional(),
 	projectRoot: z.string().optional(),
 	runId: z.string().optional(),
@@ -136,6 +152,48 @@ export const runProjectCommandOptionsSchema = z.object({
 })
 
 export type RunProjectCommandOptions = z.infer<typeof runProjectCommandOptionsSchema>
+
+export type CapabilityExecutionRequest = {
+	readonly capability: "sandbox.run_project_command"
+	readonly command: string
+	readonly commandHash: string
+	readonly maxTimeoutSeconds: number
+	readonly network: NetworkMode
+	readonly runtime: SandboxRuntimeKind
+	readonly template: string
+	readonly timeoutSeconds: number
+}
+
+export type AuthorizedCapability = {
+	readonly grant: GrantRecord
+}
+
+export type AgentAuthority = {
+	readonly ensureCapability: (
+		input: CapabilityExecutionRequest,
+	) => Promise<Result<AuthorizedCapability>>
+}
+
+export type HostedAgentAuthorityOptions = {
+	readonly agentId: AgentId
+	readonly apiUrl: string
+	readonly fetch?: typeof fetch
+	readonly hostId: HostId
+	readonly openApprovalUrl?: (url: string) => Promise<void> | void
+	readonly pollIntervalMs?: number
+	readonly projectId: ProjectId
+	readonly token: string
+	readonly waitTimeoutMs?: number
+}
+
+export type HostedAgentAuthorityEnvironment = {
+	readonly SANDHOST_AGENT_ID?: string
+	readonly SANDHOST_API_URL?: string
+	readonly SANDHOST_HOST_ID?: string
+	readonly SANDHOST_OPEN_APPROVAL?: string
+	readonly SANDHOST_PROJECT_ID?: string
+	readonly SANDHOST_SESSION_TOKEN?: string
+}
 
 export const policyConstraintsSchema = z.object({
 	defaultTemplate: z.string().optional(),
@@ -209,6 +267,209 @@ export const defaultNodeTsTemplatePolicyConstraints = {
 		allow: [],
 	},
 } satisfies PolicyConstraints
+
+export class HostedAgentAuthority implements AgentAuthority {
+	readonly #apiUrl: string
+	readonly #context: Pick<RequestGrantInput, "agentId" | "hostId" | "projectId">
+	readonly #fetch: typeof fetch
+	readonly #openApprovalUrl: (url: string) => Promise<void> | void
+	readonly #pollIntervalMs: number
+	readonly #token: string
+	readonly #waitTimeoutMs: number
+
+	constructor(options: HostedAgentAuthorityOptions) {
+		this.#apiUrl = options.apiUrl.replace(/\/+$/u, "")
+		this.#context = {
+			agentId: options.agentId,
+			hostId: options.hostId,
+			projectId: options.projectId,
+		}
+		this.#fetch = options.fetch ?? fetch
+		this.#openApprovalUrl = options.openApprovalUrl ?? openApprovalUrlWithSystemBrowser
+		this.#pollIntervalMs = options.pollIntervalMs ?? 1000
+		this.#token = options.token
+		this.#waitTimeoutMs = options.waitTimeoutMs ?? pendingGrantTtlSeconds * 1000
+	}
+
+	async ensureCapability(input: CapabilityExecutionRequest): Promise<Result<AuthorizedCapability>> {
+		const requestInput = grantRequestInput(this.#context, input)
+		const requested = await this.#requestGrant(requestInput)
+
+		if (!requested.ok) {
+			return requested
+		}
+
+		let grant = requested.value.grant
+
+		if (grant.status === "pending") {
+			try {
+				await this.#openApprovalUrl(requested.value.approvalUrl)
+			} catch (error) {
+				return err(
+					sandoError({
+						code: "GRANT_REQUIRED",
+						message: "Grant approval is required before execution.",
+						details: {
+							grantId: grant.id,
+							approvalUrl: requested.value.approvalUrl,
+							openError: error instanceof Error ? error.message : String(error),
+						},
+					}),
+				)
+			}
+
+			const decided = await this.#waitForGrantDecision(grant.id, requested.value.approvalUrl)
+
+			if (!decided.ok) {
+				return decided
+			}
+
+			grant = decided.value
+		}
+
+		if (grant.status === "denied") {
+			return err(
+				sandoError({
+					code: "GRANT_DENIED",
+					message: "Grant was denied.",
+					details: {
+						grantId: grant.id,
+						approvalUrl: requested.value.approvalUrl,
+					},
+				}),
+			)
+		}
+
+		if (grant.status === "expired") {
+			return err(
+				sandoError({
+					code: "GRANT_REQUIRED",
+					message: "Grant expired before execution.",
+					details: {
+						grantId: grant.id,
+						approvalUrl: requested.value.approvalUrl,
+					},
+				}),
+			)
+		}
+
+		const authorized = await this.#authorizeGrant({
+			...requestInput,
+			grantId: grant.id,
+		})
+
+		if (!authorized.ok) {
+			return authorized
+		}
+
+		return ok({
+			grant: authorized.value.grant,
+		})
+	}
+
+	async #requestGrant(input: RequestGrantInput): Promise<Result<RequestGrantResult>> {
+		return this.#postJson("/v1/grants/request", input, parseRequestGrantResult)
+	}
+
+	async #authorizeGrant(input: AuthorizeGrantInput): Promise<Result<AuthorizeGrantResult>> {
+		return this.#postJson("/v1/grants/authorize", input, parseAuthorizeGrantResult)
+	}
+
+	async #waitForGrantDecision(grantId: string, approvalUrl: string): Promise<Result<GrantRecord>> {
+		const startedAt = Date.now()
+
+		while (Date.now() - startedAt < this.#waitTimeoutMs) {
+			const grant = await this.#getGrant(grantId)
+
+			if (!grant.ok) {
+				return grant
+			}
+
+			if (grant.value.status !== "pending") {
+				return grant
+			}
+
+			await delay(this.#pollIntervalMs)
+		}
+
+		return err(
+			sandoError({
+				code: "GRANT_REQUIRED",
+				message: "Timed out waiting for hosted approval.",
+				details: {
+					grantId,
+					approvalUrl,
+				},
+			}),
+		)
+	}
+
+	async #getGrant(grantId: string): Promise<Result<GrantRecord>> {
+		const response = await this.#fetch(`${this.#apiUrl}/v1/grants/${encodeURIComponent(grantId)}`, {
+			headers: this.#headers(),
+		})
+
+		return parseJsonResponse(response, (value) => {
+			const parsed = z.object({ grant: z.unknown() }).safeParse(value)
+
+			if (!parsed.success) {
+				return err(validationErrorForResponse("Invalid get grant response.", parsed.error))
+			}
+
+			return parseGrantRecord(parsed.data.grant)
+		})
+	}
+
+	async #postJson<Value>(
+		path: string,
+		body: unknown,
+		parse: (value: unknown) => Result<Value>,
+	): Promise<Result<Value>> {
+		const response = await this.#fetch(`${this.#apiUrl}${path}`, {
+			method: "POST",
+			body: JSON.stringify(body),
+			headers: {
+				...this.#headers(),
+				"content-type": "application/json",
+			},
+		})
+
+		return parseJsonResponse(response, parse)
+	}
+
+	#headers(): Record<string, string> {
+		return {
+			authorization: `Bearer ${this.#token}`,
+		}
+	}
+}
+
+export function createHostedAgentAuthorityFromEnv(
+	env: HostedAgentAuthorityEnvironment = process.env,
+): AgentAuthority | undefined {
+	if (
+		env.SANDHOST_API_URL === undefined ||
+		env.SANDHOST_SESSION_TOKEN === undefined ||
+		env.SANDHOST_PROJECT_ID === undefined ||
+		env.SANDHOST_HOST_ID === undefined ||
+		env.SANDHOST_AGENT_ID === undefined
+	) {
+		return undefined
+	}
+
+	return new HostedAgentAuthority({
+		apiUrl: env.SANDHOST_API_URL,
+		token: env.SANDHOST_SESSION_TOKEN,
+		projectId: asId("project", env.SANDHOST_PROJECT_ID),
+		hostId: asId("host", env.SANDHOST_HOST_ID),
+		agentId: asId("agent", env.SANDHOST_AGENT_ID),
+		...(env.SANDHOST_OPEN_APPROVAL === "0"
+			? {
+					openApprovalUrl: () => undefined,
+				}
+			: {}),
+	})
+}
 
 export async function findProjectRoot(
 	input: FindProjectRootInput = {},
@@ -476,6 +737,18 @@ export async function runProjectCommand(
 		return effectivePolicy
 	}
 
+	const authority = options.authority
+
+	if (authority !== undefined) {
+		const authorized = await authority.ensureCapability(
+			capabilityExecutionRequest(input.value, effectivePolicy.value),
+		)
+
+		if (!authorized.ok) {
+			return authorized
+		}
+	}
+
 	const archiveFiles = await selectArchiveFiles({ projectRoot: policy.value.projectRoot })
 
 	if (!archiveFiles.ok) {
@@ -622,6 +895,159 @@ export function runAuditRef(runId: RunId | string): SandoUri {
 export function artifactIdForRunArtifact(runId: RunId | string, name: string): string {
 	const digest = createHash("sha256").update(`${runId}\0${name}`).digest("hex").slice(0, 16)
 	return `art_${digest}`
+}
+
+function capabilityExecutionRequest(
+	input: RunProjectCommandInput,
+	effectivePolicy: EffectivePolicy,
+): CapabilityExecutionRequest {
+	const shape = {
+		command: input.command,
+		template: effectivePolicy.template,
+		runtime: effectivePolicy.runtime,
+		network: effectivePolicy.network,
+		timeoutSeconds: effectivePolicy.timeoutSeconds,
+	}
+
+	return {
+		capability: "sandbox.run_project_command",
+		...shape,
+		commandHash: runProjectCommandHash(shape),
+		maxTimeoutSeconds: effectivePolicy.maxTimeoutSeconds,
+	}
+}
+
+function grantRequestInput(
+	context: Pick<RequestGrantInput, "agentId" | "hostId" | "projectId">,
+	input: CapabilityExecutionRequest,
+): RequestGrantInput {
+	return {
+		...context,
+		capability: input.capability,
+		constraints: {
+			command: input.command,
+			commandHash: input.commandHash,
+			maxTimeoutSeconds: input.maxTimeoutSeconds,
+			network: input.network,
+			runtime: input.runtime,
+			template: input.template,
+			timeoutSeconds: input.timeoutSeconds,
+		},
+	}
+}
+
+async function parseJsonResponse<Value>(
+	response: Response,
+	parse: (value: unknown) => Result<Value>,
+): Promise<Result<Value>> {
+	const value = await response.json().catch(() => undefined)
+
+	if (!response.ok) {
+		const error = parseErrorResponse(value)
+
+		return err(
+			error ??
+				sandoError({
+					code: "INTERNAL",
+					message: `Hosted sandhost request failed with HTTP ${response.status}.`,
+				}),
+		)
+	}
+
+	if (value === undefined) {
+		return err(
+			sandoError({
+				code: "INTERNAL",
+				message: "Hosted sandhost response did not contain JSON.",
+			}),
+		)
+	}
+
+	return parse(value)
+}
+
+function parseErrorResponse(value: unknown) {
+	if (typeof value !== "object" || value === null || !("error" in value)) {
+		return undefined
+	}
+
+	const error = (value as { readonly error?: unknown }).error
+
+	if (typeof error !== "object" || error === null) {
+		return undefined
+	}
+
+	const code = (error as { readonly code?: unknown }).code
+	const message = (error as { readonly message?: unknown }).message
+
+	if (
+		typeof code !== "string" ||
+		!sandoErrorCodes.includes(code as (typeof sandoErrorCodes)[number]) ||
+		typeof message !== "string"
+	) {
+		return undefined
+	}
+
+	const details = (error as { readonly details?: unknown }).details
+
+	return sandoError({
+		code: code as (typeof sandoErrorCodes)[number],
+		message,
+		...(details === undefined ? {} : { details: details as JsonValue }),
+	})
+}
+
+function validationErrorForResponse(message: string, error: z.ZodError) {
+	return sandoError({
+		code: "VALIDATION_FAILED",
+		message,
+		details: {
+			issues: error.issues.map((issue) => ({
+				path: issue.path.length === 0 ? "$" : `$.${issue.path.join(".")}`,
+				message: issue.message,
+			})),
+		},
+	})
+}
+
+async function openApprovalUrlWithSystemBrowser(url: string): Promise<void> {
+	const command = browserOpenCommand(url)
+
+	if (command === undefined) {
+		return
+	}
+
+	await execFileAsync(command.command, command.args, {
+		encoding: "utf8",
+	})
+}
+
+function browserOpenCommand(
+	url: string,
+): { readonly command: string; readonly args: readonly string[] } | undefined {
+	if (process.platform === "darwin") {
+		return { command: "open", args: [url] }
+	}
+
+	if (process.platform === "win32") {
+		return { command: "cmd.exe", args: ["/c", "start", "", url] }
+	}
+
+	if (process.env.WSL_DISTRO_NAME !== undefined || process.env.WSL_INTEROP !== undefined) {
+		return { command: "wslview", args: [url] }
+	}
+
+	if (process.platform === "linux") {
+		return { command: "xdg-open", args: [url] }
+	}
+
+	return undefined
+}
+
+async function delay(ms: number): Promise<void> {
+	await new Promise<void>((resolvePromise) => {
+		setTimeout(resolvePromise, ms)
+	})
 }
 
 function parseGitNullDelimitedPaths(output: string): readonly string[] {

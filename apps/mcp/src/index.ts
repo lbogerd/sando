@@ -7,6 +7,7 @@ import { z } from "zod"
 
 import {
 	compileEffectivePolicy,
+	createHostedAgentAuthorityFromEnv,
 	loadProjectPolicy,
 	readRunArtifact,
 	readRunDiff,
@@ -59,9 +60,17 @@ export type CreateSandhostMcpServiceOptions = RunProjectCommandOptions
 export function createSandhostMcpService(
 	options: CreateSandhostMcpServiceOptions = {},
 ): SandhostMcpService {
+	const runOptions: CreateSandhostMcpServiceOptions =
+		options.authority === undefined
+			? {
+					...options,
+					...optionalAuthority(createHostedAgentAuthorityFromEnv()),
+				}
+			: options
+
 	return {
 		async runProjectCommand(input) {
-			return runProjectCommand(input, options)
+			return runProjectCommand(input, runOptions)
 		},
 		async listTemplates() {
 			return ok({
@@ -77,8 +86,8 @@ export function createSandhostMcpService(
 		},
 		async explainPolicy() {
 			const policy = await loadProjectPolicy({
-				startPath: options.startPath,
-				projectRoot: options.projectRoot,
+				startPath: runOptions.startPath,
+				projectRoot: runOptions.projectRoot,
 			})
 
 			if (!policy.ok) {
@@ -101,7 +110,7 @@ export function createSandhostMcpService(
 			})
 		},
 		async getRun(input) {
-			const result = await readRunResult(runLookupInput(input.runId, options))
+			const result = await readRunResult(runLookupInput(input.runId, runOptions))
 
 			if (!result.ok) {
 				return result
@@ -113,7 +122,7 @@ export function createSandhostMcpService(
 			})
 		},
 		async readLogs(input) {
-			const logs = await readRunLogs(runLookupInput(input.runId, options))
+			const logs = await readRunLogs(runLookupInput(input.runId, runOptions))
 
 			if (!logs.ok) {
 				return logs
@@ -125,7 +134,7 @@ export function createSandhostMcpService(
 			})
 		},
 		async getDiff(input) {
-			const diff = await readRunDiff(runLookupInput(input.runId, options))
+			const diff = await readRunDiff(runLookupInput(input.runId, runOptions))
 
 			if (!diff.ok) {
 				return diff
@@ -137,7 +146,7 @@ export function createSandhostMcpService(
 			})
 		},
 		async downloadArtifact(input) {
-			const artifact = await readRunArtifact(artifactLookupInput(input, options))
+			const artifact = await readRunArtifact(artifactLookupInput(input, runOptions))
 
 			if (!artifact.ok) {
 				return artifact
@@ -229,6 +238,14 @@ export function createSandhostMcpServer(
 	)
 
 	return server
+}
+
+function optionalAuthority(
+	authority: CreateSandhostMcpServiceOptions["authority"],
+):
+	| { readonly authority: NonNullable<CreateSandhostMcpServiceOptions["authority"]> }
+	| Record<string, never> {
+	return authority === undefined ? {} : { authority }
 }
 
 function runLookupInput(

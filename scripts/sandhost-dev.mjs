@@ -9,6 +9,8 @@ export const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 export const devDefaults = {
 	apiHost: "127.0.0.1",
 	apiPort: 3000,
+	devAuthToken: "sandhost-dev-token",
+	devUserId: "user_dev",
 	postgresContainerName: "sandhost-postgres",
 	postgresDatabase: "sandhost",
 	postgresImage: "docker.io/library/postgres:16-alpine",
@@ -169,6 +171,8 @@ export function apiEnv(baseEnv, options) {
 		DATABASE_URL: baseEnv.DATABASE_URL ?? databaseUrl(options),
 		HOST: baseEnv.HOST ?? options.apiHost,
 		PORT: baseEnv.PORT ?? String(options.apiPort),
+		SANDHOST_DEV_AUTH_TOKEN: baseEnv.SANDHOST_DEV_AUTH_TOKEN ?? devDefaults.devAuthToken,
+		SANDHOST_DEV_USER_ID: baseEnv.SANDHOST_DEV_USER_ID ?? devDefaults.devUserId,
 		TMPDIR: baseEnv.TMPDIR ?? "/tmp",
 	}
 }
@@ -206,6 +210,10 @@ Usage:
 Starts:
   - Podman Postgres container: ${devDefaults.postgresContainerName}
   - Hosted API: http://${devDefaults.apiHost}:${devDefaults.apiPort}
+
+Development auth:
+  Authorization: Bearer ${devDefaults.devAuthToken}
+  User: ${devDefaults.devUserId}
 
 Options:
   --skip-podman, --api-only      Start only the API process.
