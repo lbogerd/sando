@@ -4,27 +4,27 @@ import { betterAuth, type BetterAuthOptions } from "better-auth"
 import { betterAuthSchema } from "@sando/db"
 
 export const authBasePath = "/api/auth"
-export const authAppName = "sandhost"
+export const authAppName = "sando"
 export const defaultMinimumPasswordLength = 8
 export const defaultMaximumPasswordLength = 128
 
 export type AuthDatabase = NonNullable<BetterAuthOptions["database"]>
-export type SandhostAuth = ReturnType<typeof betterAuth>
+export type SandoAuth = ReturnType<typeof betterAuth>
 
-export type SandhostAuthOptions = {
+export type SandoAuthOptions = {
 	readonly database: AuthDatabase
 	readonly baseURL?: string
 	readonly secret?: string
 	readonly trustedOrigins?: readonly string[]
 }
 
-export type SandhostAuthEnvironment = {
+export type SandoAuthEnvironment = {
 	readonly BETTER_AUTH_SECRET?: string
 	readonly BETTER_AUTH_URL?: string
-	readonly SANDHOST_AUTH_TRUSTED_ORIGINS?: string
+	readonly SANDO_AUTH_TRUSTED_ORIGINS?: string
 }
 
-export function createSandhostAuthOptions(input: SandhostAuthOptions): BetterAuthOptions {
+export function createSandoAuthOptions(input: SandoAuthOptions): BetterAuthOptions {
 	return {
 		appName: authAppName,
 		basePath: authBasePath,
@@ -42,17 +42,17 @@ export function createSandhostAuthOptions(input: SandhostAuthOptions): BetterAut
 	}
 }
 
-export function createSandhostAuth(input: SandhostAuthOptions): SandhostAuth {
-	return betterAuth(createSandhostAuthOptions(input))
+export function createSandoAuth(input: SandoAuthOptions): SandoAuth {
+	return betterAuth(createSandoAuthOptions(input))
 }
 
-export function createSandhostDrizzleAuth(input: {
+export function createSandoDrizzleAuth(input: {
 	readonly db: DrizzleDatabase
 	readonly baseURL?: string
 	readonly secret?: string
 	readonly trustedOrigins?: readonly string[]
-}): SandhostAuth {
-	return createSandhostAuth({
+}): SandoAuth {
+	return createSandoAuth({
 		database: drizzleAdapter(input.db, {
 			provider: "pg",
 			schema: betterAuthSchema,
@@ -63,19 +63,19 @@ export function createSandhostDrizzleAuth(input: {
 	})
 }
 
-export function sandhostAuthOptionsFromEnv(
-	env: SandhostAuthEnvironment,
-): Omit<SandhostAuthOptions, "database"> {
+export function sandoAuthOptionsFromEnv(
+	env: SandoAuthEnvironment,
+): Omit<SandoAuthOptions, "database"> {
 	return {
 		...(env.BETTER_AUTH_SECRET === undefined ? {} : { secret: env.BETTER_AUTH_SECRET }),
 		...(env.BETTER_AUTH_URL === undefined ? {} : { baseURL: env.BETTER_AUTH_URL }),
-		...trustedOriginsFromEnv(env.SANDHOST_AUTH_TRUSTED_ORIGINS),
+		...trustedOriginsFromEnv(env.SANDO_AUTH_TRUSTED_ORIGINS),
 	}
 }
 
 function trustedOriginsFromEnv(
 	value: string | undefined,
-): Pick<SandhostAuthOptions, "trustedOrigins"> | Record<string, never> {
+): Pick<SandoAuthOptions, "trustedOrigins"> | Record<string, never> {
 	const trustedOrigins = splitTrustedOrigins(value)
 
 	return trustedOrigins === undefined ? {} : { trustedOrigins }

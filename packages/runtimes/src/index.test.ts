@@ -114,7 +114,7 @@ describe("ensurePodmanImage", () => {
 			{ exitCode: 1, stdout: "", stderr: "" },
 			{ exitCode: 0, stdout: "pulled", stderr: "" },
 		])
-		const image = "ghcr.io/sandhost/node-ts:1"
+		const image = "ghcr.io/sando/node-ts:1"
 
 		await expect(
 			ensurePodmanImage({
@@ -448,7 +448,7 @@ describe("diagnosePodmanEnvironment", () => {
 			expect(result.value.checks.at(-1)).toEqual({
 				name: "podman.rootless",
 				status: "warn",
-				message: "Podman is running rootful; sandhost prefers rootless Podman.",
+				message: "Podman is running rootful; sando prefers rootless Podman.",
 				details: {
 					rootless: false,
 					version: "5.0.0",
@@ -544,7 +544,7 @@ describe("PodmanRuntime", () => {
 				metadata: {
 					artifactDir: "/artifacts",
 					image: defaultNodeTsPodmanImage,
-					name: "sandhost-run-run_123",
+					name: "sando-run-run_123",
 					network: "none",
 					resources: {
 						cpu: 2,
@@ -565,7 +565,7 @@ describe("PodmanRuntime", () => {
 				args: [
 					"create",
 					"--name",
-					"sandhost-run-run_123",
+					"sando-run-run_123",
 					"--network",
 					"none",
 					"--cpus",
@@ -577,9 +577,9 @@ describe("PodmanRuntime", () => {
 					"--env",
 					"FOO=bar",
 					"--env",
-					"SANDHOST_ARTIFACTS=/artifacts",
+					"SANDO_ARTIFACTS=/artifacts",
 					"--env",
-					"SANDHOST_WORKSPACE=/workspace",
+					"SANDO_WORKSPACE=/workspace",
 					defaultNodeTsPodmanImage,
 					"sleep",
 					"infinity",
@@ -587,7 +587,7 @@ describe("PodmanRuntime", () => {
 			},
 			{
 				command: "podman",
-				args: ["start", "sandhost-run-run_123"],
+				args: ["start", "sando-run-run_123"],
 			},
 		])
 	})
@@ -616,7 +616,7 @@ describe("PodmanRuntime", () => {
 			args: [
 				"create",
 				"--name",
-				"sandhost-run-run_123",
+				"sando-run-run_123",
 				"--cpus",
 				"1.5",
 				"--memory",
@@ -624,9 +624,9 @@ describe("PodmanRuntime", () => {
 				"--workdir",
 				"/workspace",
 				"--env",
-				"SANDHOST_ARTIFACTS=/artifacts",
+				"SANDO_ARTIFACTS=/artifacts",
 				"--env",
-				"SANDHOST_WORKSPACE=/workspace",
+				"SANDO_WORKSPACE=/workspace",
 				defaultNodeTsPodmanImage,
 				"sleep",
 				"infinity",
@@ -673,7 +673,7 @@ describe("PodmanRuntime", () => {
 				args: [
 					"create",
 					"--name",
-					"sandhost-run-run_123",
+					"sando-run-run_123",
 					"--network",
 					"none",
 					"--cpus",
@@ -683,9 +683,9 @@ describe("PodmanRuntime", () => {
 					"--workdir",
 					"/workspace",
 					"--env",
-					"SANDHOST_ARTIFACTS=/artifacts",
+					"SANDO_ARTIFACTS=/artifacts",
 					"--env",
-					"SANDHOST_WORKSPACE=/workspace",
+					"SANDO_WORKSPACE=/workspace",
 					defaultNodeTsPodmanImage,
 					"sleep",
 					"infinity",
@@ -720,14 +720,14 @@ describe("PodmanRuntime", () => {
 			expect(result.error.code).toBe("SANDBOX_FAILED")
 			expect(result.error.details).toMatchObject({
 				command: "podman",
-				args: ["start", "sandhost-run-run_123"],
+				args: ["start", "sando-run-run_123"],
 				exitCode: 125,
 				stderr: "bad start",
 			})
 		}
 		expect(runner.calls.at(-1)).toEqual({
 			command: "podman",
-			args: ["rm", "--force", "sandhost-run-run_123"],
+			args: ["rm", "--force", "sando-run-run_123"],
 		})
 	})
 
@@ -767,8 +767,8 @@ describe("PodmanRuntime", () => {
 					"NODE_ENV=test",
 					"--workdir",
 					"/workspace/packages/app",
-					"sandhost-run-run_123",
-					"/sandhost/runner/run.sh",
+					"sando-run-run_123",
+					"/sando/runner/run.sh",
 					"bash",
 					"-lc",
 					"pnpm test",
@@ -795,7 +795,7 @@ describe("PodmanRuntime", () => {
 		expect(runner.calls).toEqual([
 			{
 				command: "podman",
-				args: ["cp", `${workspaceRoot}/.`, "sandhost-run-run_123:/workspace/"],
+				args: ["cp", `${workspaceRoot}/.`, "sando-run-run_123:/workspace/"],
 			},
 		])
 	})
@@ -814,14 +814,7 @@ describe("PodmanRuntime", () => {
 		expect(runner.calls).toEqual([
 			{
 				command: "podman",
-				args: [
-					"exec",
-					"sandhost-run-run_123",
-					"/sandhost/runner/run.sh",
-					"bash",
-					"-lc",
-					"pnpm test",
-				],
+				args: ["exec", "sando-run-run_123", "/sando/runner/run.sh", "bash", "-lc", "pnpm test"],
 				options: { timeoutMs: 600000 },
 			},
 		])
@@ -853,14 +846,7 @@ describe("PodmanRuntime", () => {
 		expect(runner.calls).toEqual([
 			{
 				command: "podman",
-				args: [
-					"exec",
-					"sandhost-run-run_123",
-					"/sandhost/runner/run.sh",
-					"bash",
-					"-lc",
-					"sleep 999",
-				],
+				args: ["exec", "sando-run-run_123", "/sando/runner/run.sh", "bash", "-lc", "sleep 999"],
 				options: { timeoutMs: 5000 },
 			},
 		])
@@ -984,7 +970,7 @@ describe("PodmanRuntime", () => {
 		expect(calls).toEqual([
 			{
 				command: "podman",
-				args: ["cp", "sandhost-run-run_123:/artifacts/.", runRootPath],
+				args: ["cp", "sando-run-run_123:/artifacts/.", runRootPath],
 			},
 		])
 	})
@@ -1003,7 +989,7 @@ describe("PodmanRuntime", () => {
 			expect(result.error.code).toBe("SANDBOX_FAILED")
 			expect(result.error.details).toEqual({
 				command: "podman",
-				args: ["cp", "sandhost-run-run_123:/custom-artifacts/.", runRootPath],
+				args: ["cp", "sando-run-run_123:/custom-artifacts/.", runRootPath],
 				exitCode: 125,
 				stderr: "copy failed",
 			})
@@ -1021,7 +1007,7 @@ describe("PodmanRuntime", () => {
 		expect(runner.calls).toEqual([
 			{
 				command: "podman",
-				args: ["rm", "--force", "sandhost-run-run_123"],
+				args: ["rm", "--force", "sando-run-run_123"],
 			},
 		])
 	})
@@ -1095,7 +1081,7 @@ function fakeCleanupRuntime(destroyResult: Result<void>): {
 async function tempRunsRoot(): Promise<string> {
 	const root = await mkdtemp(join(tmpdir(), "sando-runtimes-"))
 	tempRoots.push(root)
-	return join(root, ".sandhost", "runs")
+	return join(root, ".sando", "runs")
 }
 
 async function writeArtifactFiles(rootPath: string): Promise<void> {
@@ -1121,7 +1107,7 @@ function podmanHandle(
 	} = {},
 ): SandboxHandle {
 	const metadata: Record<string, string | number> = {
-		name: "sandhost-run-run_123",
+		name: "sando-run-run_123",
 	}
 
 	if (options.network !== undefined) {

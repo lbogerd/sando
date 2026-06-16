@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-workspace="${SANDHOST_WORKSPACE:-/workspace}"
-artifacts="${SANDHOST_ARTIFACTS:-/artifacts}"
+workspace="${SANDO_WORKSPACE:-/workspace}"
+artifacts="${SANDO_ARTIFACTS:-/artifacts}"
 stdout_file="$artifacts/stdout.txt"
 stderr_file="$artifacts/stderr.txt"
 logs_file="$artifacts/logs.txt"
@@ -11,7 +11,7 @@ changed_files_file="$artifacts/changed-files.txt"
 
 usage() {
 	printf 'usage: %s <command> [args...]\n' "$0" >&2
-	printf '   or: SANDHOST_COMMAND="pnpm test" %s\n' "$0" >&2
+	printf '   or: SANDO_COMMAND="pnpm test" %s\n' "$0" >&2
 }
 
 mkdir -p "$workspace" "$artifacts"
@@ -20,10 +20,10 @@ cd "$workspace"
 
 create_baseline_commit() {
 	git init --quiet
-	git config user.email "sandhost@example.local"
-	git config user.name "sandhost"
+	git config user.email "sando@example.local"
+	git config user.name "sando"
 	git add -A
-	git commit --quiet --allow-empty -m "sandhost baseline"
+	git commit --quiet --allow-empty -m "sando baseline"
 }
 
 reset_capture_files() {
@@ -70,8 +70,8 @@ if [[ "$#" -gt 0 ]]; then
 	exit "$?"
 fi
 
-if [[ -n "${SANDHOST_COMMAND:-}" ]]; then
-	run_project_command bash -lc "$SANDHOST_COMMAND"
+if [[ -n "${SANDO_COMMAND:-}" ]]; then
+	run_project_command bash -lc "$SANDO_COMMAND"
 	exit "$?"
 fi
 

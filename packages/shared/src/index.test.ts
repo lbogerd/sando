@@ -178,20 +178,20 @@ describe("run project command schemas", () => {
 			command: "pnpm test",
 			network: "none",
 			summary: "The test suite failed.",
-			logsRef: "sandhost://runs/run_123/logs",
-			stdoutRef: "sandhost://runs/run_123/stdout",
-			stderrRef: "sandhost://runs/run_123/stderr",
-			diffRef: "sandhost://runs/run_123/diff",
-			changedFilesRef: "sandhost://runs/run_123/changed-files",
+			logsRef: "sando://runs/run_123/logs",
+			stdoutRef: "sando://runs/run_123/stdout",
+			stderrRef: "sando://runs/run_123/stderr",
+			diffRef: "sando://runs/run_123/diff",
+			changedFilesRef: "sando://runs/run_123/changed-files",
 			artifacts: [
 				{
 					id: "art_123",
 					name: "changed-files.txt",
-					uri: "sandhost://artifacts/art_123",
+					uri: "sando://artifacts/art_123",
 					sizeBytes: 128,
 				},
 			],
-			auditRef: "sandhost://runs/run_123/audit",
+			auditRef: "sando://runs/run_123/audit",
 		}
 
 		expect(parseRunProjectCommandResult(result)).toEqual({
@@ -211,10 +211,10 @@ describe("run project command schemas", () => {
 			network: "none",
 			summary: "still running",
 			logsRef: "http://example.test/logs",
-			stdoutRef: "sandhost://runs/run_123/stdout",
-			stderrRef: "sandhost://runs/run_123/stderr",
+			stdoutRef: "sando://runs/run_123/stdout",
+			stderrRef: "sando://runs/run_123/stderr",
 			artifacts: [{ name: "", uri: "nope" }],
-			auditRef: "sandhost://runs/run_123/audit",
+			auditRef: "sando://runs/run_123/audit",
 		})
 
 		expect(result.ok).toBe(false)
@@ -226,9 +226,9 @@ describe("run project command schemas", () => {
 					{ path: "$.status", message: "Expected a terminal run status." },
 					{ path: "$.exitCode", message: "Expected null or a non-negative integer." },
 					{ path: "$.durationMs", message: "Expected a non-negative integer." },
-					{ path: "$.logsRef", message: "Expected a sandhost URI." },
+					{ path: "$.logsRef", message: "Expected a sando URI." },
 					{ path: "$.artifacts[0].name", message: "Expected a non-empty string." },
-					{ path: "$.artifacts[0].uri", message: "Expected a sandhost URI." },
+					{ path: "$.artifacts[0].uri", message: "Expected a sando URI." },
 				],
 			})
 		}
@@ -312,7 +312,7 @@ describe("grant schemas", () => {
 		}
 		const requestResult = {
 			grant,
-			approvalUrl: "https://sandhost.example/v1/grants/grant_123/approval",
+			approvalUrl: "https://sando.example/v1/grants/grant_123/approval",
 			created: true,
 		}
 		const authorizeResult = {
@@ -363,7 +363,7 @@ describe("grant schemas", () => {
 					{ path: "$.projectId", message: "Expected a project ID." },
 					{ path: "$.hostId", message: "Expected a host ID." },
 					{ path: "$.agentId", message: "Expected an agent ID." },
-					{ path: "$.capability", message: "Expected a supported sandhost capability." },
+					{ path: "$.capability", message: "Expected a supported sando capability." },
 					{ path: "$.constraints.command", message: "Expected a non-empty string." },
 					{ path: "$.constraints.commandHash", message: "Expected a SHA-256 command hash." },
 					{ path: "$.constraints.maxTimeoutSeconds", message: "Expected a positive integer." },
@@ -387,7 +387,7 @@ describe("artifact metadata schemas", () => {
 			path: "/artifacts/changed-files.txt",
 			contentType: "text/plain",
 			sizeBytes: 128,
-			uploadThingKey: "ut_123",
+			storageKey: "store_123",
 			private: true,
 			createdAt: "2026-06-14T18:00:00.000Z",
 			retentionExpiresAt: "2026-07-14T18:00:00.000Z",
@@ -409,7 +409,7 @@ describe("artifact metadata schemas", () => {
 			path: "",
 			contentType: "",
 			sizeBytes: -1,
-			uploadThingKey: "",
+			storageKey: "",
 			private: false,
 			createdAt: "",
 			retentionExpiresAt: "",
@@ -427,7 +427,7 @@ describe("artifact metadata schemas", () => {
 					{ path: "$.path", message: "Expected a non-empty string." },
 					{ path: "$.contentType", message: "Expected a non-empty string." },
 					{ path: "$.sizeBytes", message: "Expected a non-negative integer." },
-					{ path: "$.uploadThingKey", message: "Expected a non-empty string." },
+					{ path: "$.storageKey", message: "Expected a non-empty string." },
 					{ path: "$.private", message: "Expected a private artifact." },
 					{ path: "$.createdAt", message: "Expected a non-empty string." },
 					{ path: "$.retentionExpiresAt", message: "Expected a non-empty string." },
@@ -440,15 +440,15 @@ describe("artifact metadata schemas", () => {
 describe("project registration schemas", () => {
 	it("accepts valid project registration input and result payloads", () => {
 		const input = {
-			name: "Sandhost",
-			localFingerprint: "git:/workspace/sandhost#main",
+			name: "Sando",
+			localFingerprint: "git:/workspace/sando#main",
 			policyId: "policy_default",
 		}
 		const project = {
 			id: "proj_123",
 			userId: "user_123",
-			name: "Sandhost",
-			localFingerprint: "git:/workspace/sandhost#main",
+			name: "Sando",
+			localFingerprint: "git:/workspace/sando#main",
 			policyId: "policy_default",
 			createdAt: "2026-06-14T17:30:00.000Z",
 		}

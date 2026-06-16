@@ -28,7 +28,7 @@ import {
 	type SandoError,
 } from "@sando/shared"
 
-export const appName = "sandhost-mcp"
+export const appName = "sando-mcp"
 export const appVersion = "0.0.0"
 
 const runIdInputSchema = z.object({
@@ -41,7 +41,7 @@ const downloadArtifactInputSchema = z.object({
 	name: z.string().min(1).optional(),
 })
 
-export type SandhostMcpService = {
+export type SandoMcpService = {
 	runProjectCommand(input: RunProjectCommandInput): Promise<Result<RunProjectCommandResult>>
 	listTemplates(): Promise<Result<Record<string, unknown>>>
 	explainPolicy(): Promise<Result<Record<string, unknown>>>
@@ -55,12 +55,10 @@ export type SandhostMcpService = {
 	}): Promise<Result<Record<string, unknown>>>
 }
 
-export type CreateSandhostMcpServiceOptions = RunProjectCommandOptions
+export type CreateSandoMcpServiceOptions = RunProjectCommandOptions
 
-export function createSandhostMcpService(
-	options: CreateSandhostMcpServiceOptions = {},
-): SandhostMcpService {
-	const runOptions: CreateSandhostMcpServiceOptions =
+export function createSandoMcpService(options: CreateSandoMcpServiceOptions = {}): SandoMcpService {
+	const runOptions: CreateSandoMcpServiceOptions =
 		options.authority === undefined
 			? {
 					...options,
@@ -160,8 +158,8 @@ export function createSandhostMcpService(
 	}
 }
 
-export function createSandhostMcpServer(
-	service: SandhostMcpService = createSandhostMcpService(),
+export function createSandoMcpServer(
+	service: SandoMcpService = createSandoMcpService(),
 ): McpServer {
 	const server = new McpServer({
 		name: appName,
@@ -169,69 +167,69 @@ export function createSandhostMcpServer(
 	})
 
 	server.registerTool(
-		"sandhost_run_project_command",
+		"sando_run_project_command",
 		{
 			title: "Run project command",
 			description:
-				"Run a project command inside a local sandhost sandbox and return logs, diff, and artifact refs.",
+				"Run a project command inside a local sando sandbox and return logs, diff, and artifact refs.",
 			inputSchema: runProjectCommandInputSchema,
 		},
 		async (input) => toolResult(await service.runProjectCommand(input)),
 	)
 
 	server.registerTool(
-		"sandhost_list_templates",
+		"sando_list_templates",
 		{
 			title: "List templates",
-			description: "List sandbox runtime templates available to this sandhost MCP server.",
+			description: "List sandbox runtime templates available to this sando MCP server.",
 		},
 		async () => toolResult(await service.listTemplates()),
 	)
 
 	server.registerTool(
-		"sandhost_explain_policy",
+		"sando_explain_policy",
 		{
 			title: "Explain policy",
-			description: "Show the local sandhost policy and effective defaults for this project.",
+			description: "Show the local sando policy and effective defaults for this project.",
 		},
 		async () => toolResult(await service.explainPolicy()),
 	)
 
 	server.registerTool(
-		"sandhost_get_run",
+		"sando_get_run",
 		{
 			title: "Get run",
-			description: "Read the local result.json metadata for a sandhost run.",
+			description: "Read the local result.json metadata for a run.",
 			inputSchema: runIdInputSchema,
 		},
 		async (input) => toolResult(await service.getRun(input)),
 	)
 
 	server.registerTool(
-		"sandhost_read_logs",
+		"sando_read_logs",
 		{
 			title: "Read logs",
-			description: "Read logs.txt for a sandhost run.",
+			description: "Read logs.txt for a run.",
 			inputSchema: runIdInputSchema,
 		},
 		async (input) => toolResult(await service.readLogs(input)),
 	)
 
 	server.registerTool(
-		"sandhost_get_diff",
+		"sando_get_diff",
 		{
 			title: "Get diff",
-			description: "Read diff.patch for a sandhost run.",
+			description: "Read diff.patch for a run.",
 			inputSchema: runIdInputSchema,
 		},
 		async (input) => toolResult(await service.getDiff(input)),
 	)
 
 	server.registerTool(
-		"sandhost_download_artifact",
+		"sando_download_artifact",
 		{
 			title: "Download artifact",
-			description: "Read a local sandhost artifact by artifactId, or by runId and artifact name.",
+			description: "Read a local sando artifact by artifactId, or by runId and artifact name.",
 			inputSchema: downloadArtifactInputSchema,
 		},
 		async (input) => toolResult(await service.downloadArtifact(compactArtifactInput(input))),
@@ -241,16 +239,16 @@ export function createSandhostMcpServer(
 }
 
 function optionalAuthority(
-	authority: CreateSandhostMcpServiceOptions["authority"],
+	authority: CreateSandoMcpServiceOptions["authority"],
 ):
-	| { readonly authority: NonNullable<CreateSandhostMcpServiceOptions["authority"]> }
+	| { readonly authority: NonNullable<CreateSandoMcpServiceOptions["authority"]> }
 	| Record<string, never> {
 	return authority === undefined ? {} : { authority }
 }
 
 function runLookupInput(
 	runId: string,
-	options: CreateSandhostMcpServiceOptions,
+	options: CreateSandoMcpServiceOptions,
 ): { readonly runId: string; readonly runsRootPath?: string } {
 	return {
 		runId,
@@ -264,7 +262,7 @@ function artifactLookupInput(
 		readonly name?: string | undefined
 		readonly runId?: string | undefined
 	},
-	options: CreateSandhostMcpServiceOptions,
+	options: CreateSandoMcpServiceOptions,
 ): {
 	readonly artifactId?: string
 	readonly name?: string
@@ -296,9 +294,9 @@ function compactArtifactInput(input: {
 }
 
 export async function startStdioServer(
-	service: SandhostMcpService = createSandhostMcpService(),
+	service: SandoMcpService = createSandoMcpService(),
 ): Promise<void> {
-	const server = createSandhostMcpServer(service)
+	const server = createSandoMcpServer(service)
 	await server.connect(new StdioServerTransport())
 }
 

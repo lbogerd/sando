@@ -5,4 +5,4 @@ coverage/
 .turbo/
 .vite/
 *.tsbuildinfo
-.sandhost
+.sando

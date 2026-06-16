@@ -21,8 +21,8 @@ import {
 	type JsonValue,
 } from "@sando/shared"
 
-export const databaseSchemaName = "sandhost"
-export const sandhostSchema = pgSchema(databaseSchemaName)
+export const databaseSchemaName = "sando"
+export const sandoSchema = pgSchema(databaseSchemaName)
 
 export const idColumnLength = 128
 
@@ -50,14 +50,14 @@ export const auditEventTypeValues = [
 	"grant.expired",
 ] as const
 
-export const hostPlatformEnum = sandhostSchema.enum("host_platform", hostPlatformValues)
-export const agentKindEnum = sandhostSchema.enum("agent_kind", agentKindValues)
-export const grantScopeEnum = sandhostSchema.enum("grant_scope", grantScopeValues)
-export const grantStatusEnum = sandhostSchema.enum("grant_status", grantStatusValues)
-export const runStatusEnum = sandhostSchema.enum("run_status", runStatusValues)
-export const auditEventTypeEnum = sandhostSchema.enum("audit_event_type", auditEventTypeValues)
-export const networkModeEnum = sandhostSchema.enum("network_mode", networkModes)
-export const sandboxRuntimeEnum = sandhostSchema.enum("sandbox_runtime", sandboxRuntimeKinds)
+export const hostPlatformEnum = sandoSchema.enum("host_platform", hostPlatformValues)
+export const agentKindEnum = sandoSchema.enum("agent_kind", agentKindValues)
+export const grantScopeEnum = sandoSchema.enum("grant_scope", grantScopeValues)
+export const grantStatusEnum = sandoSchema.enum("grant_status", grantStatusValues)
+export const runStatusEnum = sandoSchema.enum("run_status", runStatusValues)
+export const auditEventTypeEnum = sandoSchema.enum("audit_event_type", auditEventTypeValues)
+export const networkModeEnum = sandoSchema.enum("network_mode", networkModes)
+export const sandboxRuntimeEnum = sandoSchema.enum("sandbox_runtime", sandboxRuntimeKinds)
 
 export type HostPlatform = (typeof hostPlatformValues)[number]
 export type AgentKind = (typeof agentKindValues)[number]
@@ -115,7 +115,7 @@ function authUpdatedAtColumn() {
 	return requiredAuthTimestampColumn("updated_at").defaultNow()
 }
 
-export const user = sandhostSchema.table("user", {
+export const user = sandoSchema.table("user", {
 	id: idColumn().primaryKey(),
 	name: text("name").notNull(),
 	email: text("email").notNull().unique(),
@@ -125,7 +125,7 @@ export const user = sandhostSchema.table("user", {
 	updatedAt: authUpdatedAtColumn(),
 })
 
-export const session = sandhostSchema.table("session", {
+export const session = sandoSchema.table("session", {
 	id: idColumn().primaryKey(),
 	expiresAt: requiredAuthTimestampColumn("expires_at"),
 	token: text("token").notNull().unique(),
@@ -138,7 +138,7 @@ export const session = sandhostSchema.table("session", {
 		.references(() => user.id, { onDelete: "cascade" }),
 })
 
-export const account = sandhostSchema.table("account", {
+export const account = sandoSchema.table("account", {
 	id: idColumn().primaryKey(),
 	accountId: text("account_id").notNull(),
 	providerId: text("provider_id").notNull(),
@@ -156,7 +156,7 @@ export const account = sandhostSchema.table("account", {
 	updatedAt: authUpdatedAtColumn(),
 })
 
-export const verification = sandhostSchema.table("verification", {
+export const verification = sandoSchema.table("verification", {
 	id: idColumn().primaryKey(),
 	identifier: text("identifier").notNull(),
 	value: text("value").notNull(),
@@ -172,7 +172,7 @@ export const betterAuthSchema = {
 	verification,
 } as const
 
-export const project = sandhostSchema.table(
+export const project = sandoSchema.table(
 	"project",
 	{
 		id: idColumn().primaryKey(),
@@ -192,7 +192,7 @@ export const project = sandhostSchema.table(
 export type Project = InferSelectModel<typeof project>
 export type NewProject = InferInsertModel<typeof project>
 
-export const host = sandhostSchema.table(
+export const host = sandoSchema.table(
 	"host",
 	{
 		id: idColumn().primaryKey(),
@@ -212,7 +212,7 @@ export const host = sandhostSchema.table(
 export type Host = InferSelectModel<typeof host>
 export type NewHost = InferInsertModel<typeof host>
 
-export const agent = sandhostSchema.table(
+export const agent = sandoSchema.table(
 	"agent",
 	{
 		id: idColumn().primaryKey(),
@@ -239,7 +239,7 @@ export const agent = sandhostSchema.table(
 export type Agent = InferSelectModel<typeof agent>
 export type NewAgent = InferInsertModel<typeof agent>
 
-export const grant = sandhostSchema.table(
+export const grant = sandoSchema.table(
 	"grant",
 	{
 		id: idColumn().primaryKey(),
@@ -276,7 +276,7 @@ export const grant = sandhostSchema.table(
 export type Grant = InferSelectModel<typeof grant>
 export type NewGrant = InferInsertModel<typeof grant>
 
-export const run = sandhostSchema.table(
+export const run = sandoSchema.table(
 	"run",
 	{
 		id: idColumn().primaryKey(),
@@ -314,7 +314,7 @@ export const run = sandhostSchema.table(
 export type Run = InferSelectModel<typeof run>
 export type NewRun = InferInsertModel<typeof run>
 
-export const artifact = sandhostSchema.table(
+export const artifact = sandoSchema.table(
 	"artifact",
 	{
 		id: idColumn().primaryKey(),
@@ -328,14 +328,14 @@ export const artifact = sandhostSchema.table(
 		path: text("path").notNull(),
 		contentType: text("content_type"),
 		sizeBytes: integer("size_bytes"),
-		uploadThingKey: text("upload_thing_key").notNull(),
+		storageKey: text("storage_key").notNull(),
 		private: boolean("private").notNull().default(true),
 		createdAt: createdAtColumn(),
 		retentionExpiresAt: optionalTimestampColumn("retention_expires_at"),
 	},
 	(table) => [
 		index("artifact_run_idx").on(table.runId),
-		uniqueIndex("artifact_upload_thing_key_unique").on(table.uploadThingKey),
+		uniqueIndex("artifact_storage_key_unique").on(table.storageKey),
 		uniqueIndex("artifact_run_path_unique").on(table.runId, table.path),
 	],
 )
@@ -343,7 +343,7 @@ export const artifact = sandhostSchema.table(
 export type Artifact = InferSelectModel<typeof artifact>
 export type NewArtifact = InferInsertModel<typeof artifact>
 
-export const auditEvent = sandhostSchema.table(
+export const auditEvent = sandoSchema.table(
 	"audit_event",
 	{
 		id: idColumn().primaryKey(),

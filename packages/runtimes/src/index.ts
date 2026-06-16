@@ -31,11 +31,11 @@ export const packageName = "runtimes"
 const execFileAsync = promisify(execFile)
 
 export const defaultPodmanExecutable = "podman"
-export const defaultNodeTsPodmanImage = "localhost/sandhost-node-ts:local"
-export const defaultPodmanRunnerPath = "/sandhost/runner/run.sh"
+export const defaultNodeTsPodmanImage = "localhost/sando-node-ts:local"
+export const defaultPodmanRunnerPath = "/sando/runner/run.sh"
 export const defaultPodmanWorkspacePath = "/workspace"
 export const defaultPodmanArtifactPath = "/artifacts"
-export const defaultPodmanRunsRootPath = ".sandhost/runs"
+export const defaultPodmanRunsRootPath = ".sando/runs"
 export const defaultPodmanDiagnosticsTimeoutMs = 5000
 
 const jsonValueSchema = z.custom<JsonValue>()
@@ -866,8 +866,8 @@ function podmanCreateArgs(input: PodmanCreateArgsInput): readonly string[] {
 		input.workdir,
 		...podmanEnvArgs({
 			...input.environment,
-			SANDHOST_ARTIFACTS: input.artifactDir,
-			SANDHOST_WORKSPACE: input.workdir,
+			SANDO_ARTIFACTS: input.artifactDir,
+			SANDO_WORKSPACE: input.workdir,
 		}),
 		input.image,
 		"sleep",
@@ -1130,7 +1130,7 @@ function podmanCommandStatus(result: PodmanCommandResult): SandboxCommandStatus 
 }
 
 function podmanSandboxName(runId: RunId): string {
-	return `sandhost-run-${String(runId).replaceAll(/[^a-zA-Z0-9_.-]/g, "-")}`
+	return `sando-run-${String(runId).replaceAll(/[^a-zA-Z0-9_.-]/g, "-")}`
 }
 
 function podmanContainerName(handle: SandboxHandle): Result<string> {
@@ -1344,7 +1344,7 @@ function podmanRootlessDiagnosticCheck(summary: PodmanInfoSummary): PodmanDiagno
 		return {
 			name: "podman.rootless",
 			status: "warn",
-			message: "Podman is running rootful; sandhost prefers rootless Podman.",
+			message: "Podman is running rootful; sando prefers rootless Podman.",
 			details: podmanInfoSummaryDetails(summary),
 		}
 	}

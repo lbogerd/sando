@@ -23,6 +23,7 @@ import {
 	type AgentAuthority,
 	artifactIdForRunArtifact,
 	compileEffectivePolicy,
+	filterArchiveFiles,
 	filterSensitiveArchiveFiles,
 	findProjectRoot,
 	isSensitiveArchiveFilePath,
@@ -45,14 +46,14 @@ afterEach(async () => {
 })
 
 describe("findProjectRoot", () => {
-	it("detects an explicit sandhost policy root", async () => {
+	it("detects an explicit sando policy root", async () => {
 		const root = await tempProject()
-		await mkdir(join(root, ".sandhost"), { recursive: true })
-		await writeFile(join(root, ".sandhost", "policy.json"), "{}")
+		await mkdir(join(root, ".sando"), { recursive: true })
+		await writeFile(join(root, ".sando", "policy.json"), "{}")
 
 		await expect(findProjectRoot({ startPath: root })).resolves.toEqual({
 			ok: true,
-			value: { path: root, marker: ".sandhost/policy.json" },
+			value: { path: root, marker: ".sando/policy.json" },
 		})
 	})
 
@@ -121,14 +122,14 @@ describe("findProjectRoot", () => {
 			expect(result.error.code).toBe("NOT_FOUND")
 			expect(result.error.details).toEqual({
 				startPath: root,
-				markers: [".sandhost/policy.json", ".git", "pnpm-workspace.yaml", "package.json"],
+				markers: [".sando/policy.json", ".git", "pnpm-workspace.yaml", "package.json"],
 			})
 		}
 	})
 })
 
 describe("loadProjectPolicy", () => {
-	it("loads and validates a sandhost policy from the detected project root", async () => {
+	it("loads and validates a sando policy from the detected project root", async () => {
 		const root = await tempProject()
 		const nested = join(root, "packages", "app")
 		const policy = {
@@ -183,7 +184,7 @@ describe("loadProjectPolicy", () => {
 		const root = await tempProject()
 		const policyPath = join(root, projectPolicyFilePath)
 
-		await mkdir(join(root, ".sandhost"), { recursive: true })
+		await mkdir(join(root, ".sando"), { recursive: true })
 		await writeFile(policyPath, "{")
 
 		const result = await loadProjectPolicy({ startPath: root })
@@ -191,7 +192,7 @@ describe("loadProjectPolicy", () => {
 		expect(result.ok).toBe(false)
 		if (!result.ok) {
 			expect(result.error.code).toBe("VALIDATION_FAILED")
-			expect(result.error.message).toBe("Sandhost policy file contains invalid JSON.")
+			expect(result.error.message).toBe("Sando policy file contains invalid JSON.")
 			expect(result.error.details).toEqual({
 				path: policyPath,
 				message: expect.any(String),
@@ -450,6 +451,22 @@ describe("selectArchiveFiles", () => {
 		}
 	})
 
+	it("filters policy exclude patterns after git selection", () => {
+		expect(
+			filterArchiveFiles(
+				[
+					".sando/policy.json",
+					".sando/runs/run_fixture/result.json",
+					"debug.log",
+					"dist/output.js",
+					"notes/todo.md",
+					"packages/app/dist/output.js",
+				],
+				[".sando/runs", "dist"],
+			),
+		).toEqual([".sando/policy.json", "debug.log", "notes/todo.md"])
+	})
+
 	it("detects the project root from a nested start path", async () => {
 		const root = await tempProject()
 		const nested = join(root, "packages", "app")
@@ -493,7 +510,7 @@ describe("integration fixture repo", () => {
 
 		await expect(findProjectRoot({ startPath: sourcePath })).resolves.toEqual({
 			ok: true,
-			value: { path: root, marker: ".sandhost/policy.json" },
+			value: { path: root, marker: ".sando/policy.json" },
 		})
 
 		const policyResult = await loadProjectPolicy({ startPath: sourcePath })
@@ -530,7 +547,7 @@ describe("integration fixture repo", () => {
 					"dist",
 					"build",
 					"coverage",
-					".sandhost/runs",
+					".sando/runs",
 					"ignored-dir",
 				],
 			},
@@ -571,7 +588,7 @@ describe("integration fixture repo", () => {
 					"dist",
 					"build",
 					"coverage",
-					".sandhost/runs",
+					".sando/runs",
 					"ignored-dir",
 				],
 			},
@@ -591,7 +608,7 @@ describe("integration fixture repo", () => {
 				projectRoot: root,
 				files: [
 					".gitignore",
-					".sandhost/policy.json",
+					".sando/policy.json",
 					"README.md",
 					"notes/todo.md",
 					"package.json",
@@ -640,7 +657,7 @@ describe("runProjectCommand", () => {
 					runtime: "podman",
 					runId: input.runId,
 					metadata: {
-						name: "sandhost-run-run_test",
+						name: "sando-run-run_test",
 					},
 				})
 			},
@@ -708,16 +725,16 @@ describe("runProjectCommand", () => {
 			command: "pnpm test",
 			network: "none",
 			summary: "Command succeeded: pnpm test",
-			logsRef: "sandhost://runs/run_test/logs",
-			diffRef: "sandhost://runs/run_test/diff",
-			auditRef: "sandhost://runs/run_test/audit",
+			logsRef: "sando://runs/run_test/logs",
+			diffRef: "sando://runs/run_test/diff",
+			auditRef: "sando://runs/run_test/audit",
 		})
 		expect(result.value.artifacts).toEqual(
 			expect.arrayContaining([
 				expect.objectContaining({
 					id: artifactIdForRunArtifact(runId, "logs.txt"),
 					name: "logs.txt",
-					uri: `sandhost://artifacts/${artifactIdForRunArtifact(runId, "logs.txt")}`,
+					uri: `sando://artifacts/${artifactIdForRunArtifact(runId, "logs.txt")}`,
 				}),
 				expect.objectContaining({
 					id: artifactIdForRunArtifact(runId, "diff.patch"),
@@ -920,7 +937,7 @@ async function addFixtureWorkingTreeFiles(root: string): Promise<void> {
 	await mkdir(join(root, "coverage"), { recursive: true })
 	await mkdir(join(root, "ignored-dir"), { recursive: true })
 	await mkdir(join(root, "node_modules", ".cache"), { recursive: true })
-	await mkdir(join(root, ".sandhost", "runs", "run_fixture"), { recursive: true })
+	await mkdir(join(root, ".sando", "runs", "run_fixture"), { recursive: true })
 	await mkdir(join(root, "certs"), { recursive: true })
 	await writeFile(join(root, "notes", "todo.md"), "safe untracked note\n")
 	await writeFile(join(root, ".env"), "TOKEN=dummy\n")
@@ -930,7 +947,7 @@ async function addFixtureWorkingTreeFiles(root: string): Promise<void> {
 	await writeFile(join(root, "coverage", "coverage.json"), "{}\n")
 	await writeFile(join(root, "ignored-dir", "generated.txt"), "ignored generated file\n")
 	await writeFile(join(root, "node_modules", ".cache", "entry"), "ignored dependency cache\n")
-	await writeFile(join(root, ".sandhost", "runs", "run_fixture", "result.json"), "{}\n")
+	await writeFile(join(root, ".sando", "runs", "run_fixture", "result.json"), "{}\n")
 	await writeFile(join(root, "debug.log"), "ignored log\n")
 }
 
@@ -945,7 +962,7 @@ function fakeRuntime(calls: string[], artifacts: ArtifactBundle): SandboxRuntime
 				runtime: "podman",
 				runId: input.runId,
 				metadata: {
-					name: `sandhost-run-${input.runId}`,
+					name: `sando-run-${input.runId}`,
 				},
 			})
 		},
@@ -1075,7 +1092,7 @@ async function writeRunArtifactBundle(rootPath: string): Promise<ArtifactBundle>
 }
 
 async function writePolicy(root: string, policy: unknown): Promise<void> {
-	await mkdir(join(root, ".sandhost"), { recursive: true })
+	await mkdir(join(root, ".sando"), { recursive: true })
 	await writeFile(join(root, projectPolicyFilePath), JSON.stringify(policy, null, 2))
 }
 

@@ -156,7 +156,7 @@ export const sandboxCapabilities = [
 ] as const
 
 export const capabilitySchema = z.enum(sandboxCapabilities, {
-	error: "Expected a supported sandhost capability.",
+	error: "Expected a supported sando capability.",
 })
 
 export type Capability = z.infer<typeof capabilitySchema>
@@ -278,17 +278,8 @@ export const defaultSandoPolicy = {
 	secrets: {
 		allow: [],
 	},
-	artifacts: ["coverage/**", "test-results/**", "playwright-report/**", "*.patch"],
-	exclude: [
-		".git",
-		"node_modules",
-		".env",
-		".env.*",
-		"dist",
-		"build",
-		"coverage",
-		".sandhost/runs",
-	],
+	artifacts: ["coverage/**", "test-results/**", "*.patch"],
+	exclude: [".git", "node_modules", ".env", ".env.*", "dist", "build", "coverage", ".sando/runs"],
 } as const satisfies SandoPolicy
 
 export const sandoPolicyMetadata = {
@@ -302,7 +293,7 @@ export function parseSandoPolicy(value: unknown): Result<SandoPolicy> {
 	const result = sandoPolicySchema.safeParse(value)
 
 	if (!result.success) {
-		return err(validationError("Invalid sandhost policy.", result.error))
+		return err(validationError("Invalid sando policy.", result.error))
 	}
 
 	return ok(result.data)
@@ -543,11 +534,11 @@ export const runStatusSchema = z.enum(runStatuses, {
 
 export type RunStatus = z.infer<typeof runStatusSchema>
 
-export type SandoUri = `sandhost://${string}`
+export type SandoUri = `sando://${string}`
 
 export const sandoUriSchema = z
 	.string()
-	.refine((value): value is SandoUri => value.startsWith("sandhost://"), "Expected a sandhost URI.")
+	.refine((value): value is SandoUri => value.startsWith("sando://"), "Expected a sando URI.")
 
 export function isSandoUri(value: unknown): value is SandoUri {
 	return sandoUriSchema.safeParse(value).success
@@ -575,7 +566,7 @@ export const artifactRecordSchema = z.object({
 	path: nonEmptyStringSchema,
 	contentType: nonEmptyStringSchema.optional(),
 	sizeBytes: nonNegativeIntegerSchema.optional(),
-	uploadThingKey: nonEmptyStringSchema,
+	storageKey: nonEmptyStringSchema,
 	private: z.literal(true, "Expected a private artifact."),
 	createdAt: nonEmptyStringSchema,
 	retentionExpiresAt: nonEmptyStringSchema.optional(),
@@ -639,7 +630,7 @@ export type RunProjectCommandResult = z.infer<typeof runProjectCommandResultSche
 export const runProjectCommandResultMetadata = {
 	statuses: runProjectCommandStatuses,
 	networks: networkModes,
-	uriScheme: "sandhost://",
+	uriScheme: "sando://",
 } as const
 
 export function parseRunProjectCommandResult(value: unknown): Result<RunProjectCommandResult> {

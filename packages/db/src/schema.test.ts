@@ -27,16 +27,16 @@ import {
 	run,
 	runStatusEnum,
 	sandboxRuntimeEnum,
-	sandhostSchema,
+	sandoSchema,
 	session,
 	user,
 	verification,
 } from "./index.js"
 
 describe("database schema foundation", () => {
-	it("uses the hosted sandhost Postgres schema", () => {
-		expect(databaseSchemaName).toBe("sandhost")
-		expect(sandhostSchema.schemaName).toBe("sandhost")
+	it("uses the hosted sando Postgres schema", () => {
+		expect(databaseSchemaName).toBe("sando")
+		expect(sandoSchema.schemaName).toBe("sando")
 	})
 
 	it("defines native enum values for hosted metadata", () => {
@@ -63,19 +63,19 @@ describe("database schema foundation", () => {
 		expect(sandboxRuntimeEnum.enumValues).toEqual(["podman", "docker", "kubernetes"])
 	})
 
-	it("keeps enum definitions inside the sandhost schema", () => {
-		expect(hostPlatformEnum.schema).toBe("sandhost")
-		expect(agentKindEnum.schema).toBe("sandhost")
-		expect(grantScopeEnum.schema).toBe("sandhost")
-		expect(grantStatusEnum.schema).toBe("sandhost")
-		expect(runStatusEnum.schema).toBe("sandhost")
-		expect(auditEventTypeEnum.schema).toBe("sandhost")
-		expect(networkModeEnum.schema).toBe("sandhost")
-		expect(sandboxRuntimeEnum.schema).toBe("sandhost")
+	it("keeps enum definitions inside the sando schema", () => {
+		expect(hostPlatformEnum.schema).toBe("sando")
+		expect(agentKindEnum.schema).toBe("sando")
+		expect(grantScopeEnum.schema).toBe("sando")
+		expect(grantStatusEnum.schema).toBe("sando")
+		expect(runStatusEnum.schema).toBe("sando")
+		expect(auditEventTypeEnum.schema).toBe("sando")
+		expect(networkModeEnum.schema).toBe("sando")
+		expect(sandboxRuntimeEnum.schema).toBe("sando")
 	})
 
 	it("provides reusable column builders with DB defaults", () => {
-		const probeTable = sandhostSchema.table("schema_probe", {
+		const probeTable = sandoSchema.table("schema_probe", {
 			id: idColumn().primaryKey(),
 			createdAt: createdAtColumn(),
 			startedAt: optionalTimestampColumn("started_at"),
@@ -104,7 +104,7 @@ describe("database schema foundation", () => {
 		})
 	})
 
-	it("maps Better Auth core fields to sandhost schema tables", () => {
+	it("maps Better Auth core fields to sando schema tables", () => {
 		const userColumns = getTableColumns(user)
 		const sessionColumns = getTableColumns(session)
 		const accountColumns = getTableColumns(account)
@@ -129,7 +129,7 @@ describe("database schema foundation", () => {
 		const config = getTableConfig(project)
 
 		expect(config.name).toBe("project")
-		expect(config.schema).toBe("sandhost")
+		expect(config.schema).toBe("sando")
 		expect(columns.id.primary).toBe(true)
 		expect(columns.userId.notNull).toBe(true)
 		expect(columns.userId.getSQLType()).toBe(`varchar(${idColumnLength})`)
@@ -160,7 +160,7 @@ describe("database schema foundation", () => {
 		const config = getTableConfig(host)
 
 		expect(config.name).toBe("host")
-		expect(config.schema).toBe("sandhost")
+		expect(config.schema).toBe("sando")
 		expect(columns.id.primary).toBe(true)
 		expect(columns.userId.notNull).toBe(true)
 		expect(columns.userId.getSQLType()).toBe(`varchar(${idColumnLength})`)
@@ -168,11 +168,11 @@ describe("database schema foundation", () => {
 		expect(columns.name.getSQLType()).toBe("text")
 		expect(columns.platform.notNull).toBe(true)
 		expect(columns.platform.getSQLType()).toBe("host_platform")
-		expect(hostPlatformEnum.schema).toBe("sandhost")
+		expect(hostPlatformEnum.schema).toBe("sando")
 		expect(hostPlatformEnum.enumValues).toEqual(["linux-wsl"])
 		expect(columns.runtime.notNull).toBe(true)
 		expect(columns.runtime.getSQLType()).toBe("sandbox_runtime")
-		expect(sandboxRuntimeEnum.schema).toBe("sandhost")
+		expect(sandboxRuntimeEnum.schema).toBe("sando")
 		expect(sandboxRuntimeEnum.enumValues).toEqual(["podman", "docker", "kubernetes"])
 		expect(columns.fingerprint.notNull).toBe(true)
 		expect(columns.fingerprint.getSQLType()).toBe("text")
@@ -200,7 +200,7 @@ describe("database schema foundation", () => {
 		const config = getTableConfig(agent)
 
 		expect(config.name).toBe("agent")
-		expect(config.schema).toBe("sandhost")
+		expect(config.schema).toBe("sando")
 		expect(columns.id.primary).toBe(true)
 		expect(columns.userId.notNull).toBe(true)
 		expect(columns.userId.getSQLType()).toBe(`varchar(${idColumnLength})`)
@@ -208,7 +208,7 @@ describe("database schema foundation", () => {
 		expect(columns.hostId.getSQLType()).toBe(`varchar(${idColumnLength})`)
 		expect(columns.kind.notNull).toBe(true)
 		expect(columns.kind.getSQLType()).toBe("agent_kind")
-		expect(agentKindEnum.schema).toBe("sandhost")
+		expect(agentKindEnum.schema).toBe("sando")
 		expect(agentKindEnum.enumValues).toEqual(["codex"])
 		expect(columns.displayName.notNull).toBe(true)
 		expect(columns.displayName.getSQLType()).toBe("text")
@@ -236,7 +236,7 @@ describe("database schema foundation", () => {
 		const config = getTableConfig(grant)
 
 		expect(config.name).toBe("grant")
-		expect(config.schema).toBe("sandhost")
+		expect(config.schema).toBe("sando")
 		expect(columns.id.primary).toBe(true)
 		expect(columns.userId.notNull).toBe(true)
 		expect(columns.projectId.notNull).toBe(true)
@@ -250,11 +250,11 @@ describe("database schema foundation", () => {
 		expect(columns.constraints.getSQLType()).toBe("jsonb")
 		expect(columns.scope.notNull).toBe(true)
 		expect(columns.scope.getSQLType()).toBe("grant_scope")
-		expect(grantScopeEnum.schema).toBe("sandhost")
+		expect(grantScopeEnum.schema).toBe("sando")
 		expect(grantScopeEnum.enumValues).toEqual(["one_shot", "project_window"])
 		expect(columns.status.notNull).toBe(true)
 		expect(columns.status.getSQLType()).toBe("grant_status")
-		expect(grantStatusEnum.schema).toBe("sandhost")
+		expect(grantStatusEnum.schema).toBe("sando")
 		expect(grantStatusEnum.enumValues).toEqual([
 			"pending",
 			"approved",
@@ -285,7 +285,7 @@ describe("database schema foundation", () => {
 		const config = getTableConfig(run)
 
 		expect(config.name).toBe("run")
-		expect(config.schema).toBe("sandhost")
+		expect(config.schema).toBe("sando")
 		expect(columns.id.primary).toBe(true)
 		expect(columns.userId.notNull).toBe(true)
 		expect(columns.projectId.notNull).toBe(true)
@@ -298,14 +298,14 @@ describe("database schema foundation", () => {
 		expect(columns.template.getSQLType()).toBe("text")
 		expect(columns.runtime.notNull).toBe(true)
 		expect(columns.runtime.getSQLType()).toBe("sandbox_runtime")
-		expect(sandboxRuntimeEnum.schema).toBe("sandhost")
+		expect(sandboxRuntimeEnum.schema).toBe("sando")
 		expect(columns.network.notNull).toBe(true)
 		expect(columns.network.getSQLType()).toBe("network_mode")
-		expect(networkModeEnum.schema).toBe("sandhost")
+		expect(networkModeEnum.schema).toBe("sando")
 		expect(networkModeEnum.enumValues).toEqual(["none", "default"])
 		expect(columns.status.notNull).toBe(true)
 		expect(columns.status.getSQLType()).toBe("run_status")
-		expect(runStatusEnum.schema).toBe("sandhost")
+		expect(runStatusEnum.schema).toBe("sando")
 		expect(runStatusEnum.enumValues).toEqual([
 			"queued",
 			"running",
@@ -346,7 +346,7 @@ describe("database schema foundation", () => {
 		const config = getTableConfig(artifact)
 
 		expect(config.name).toBe("artifact")
-		expect(config.schema).toBe("sandhost")
+		expect(config.schema).toBe("sando")
 		expect(columns.id.primary).toBe(true)
 		expect(columns.runId.notNull).toBe(true)
 		expect(columns.runId.getSQLType()).toBe(`varchar(${idColumnLength})`)
@@ -360,8 +360,8 @@ describe("database schema foundation", () => {
 		expect(columns.contentType.getSQLType()).toBe("text")
 		expect(columns.sizeBytes.notNull).toBe(false)
 		expect(columns.sizeBytes.getSQLType()).toBe("integer")
-		expect(columns.uploadThingKey.notNull).toBe(true)
-		expect(columns.uploadThingKey.getSQLType()).toBe("text")
+		expect(columns.storageKey.notNull).toBe(true)
+		expect(columns.storageKey.getSQLType()).toBe("text")
 		expect(columns.private.notNull).toBe(true)
 		expect(columns.private.hasDefault).toBe(true)
 		expect(columns.private.getSQLType()).toBe("boolean")
@@ -374,8 +374,8 @@ describe("database schema foundation", () => {
 	it("indexes artifacts by run and storage identity", () => {
 		const config = getTableConfig(artifact)
 		const runIndex = config.indexes.find((index) => index.config.name === "artifact_run_idx")
-		const uploadKeyIndex = config.indexes.find(
-			(index) => index.config.name === "artifact_upload_thing_key_unique",
+		const storageKeyIndex = config.indexes.find(
+			(index) => index.config.name === "artifact_storage_key_unique",
 		)
 		const runPathIndex = config.indexes.find(
 			(index) => index.config.name === "artifact_run_path_unique",
@@ -385,10 +385,10 @@ describe("database schema foundation", () => {
 		expect(
 			runIndex?.config.columns.map((column) => ("name" in column ? column.name : undefined)),
 		).toEqual(["run_id"])
-		expect(uploadKeyIndex?.config.unique).toBe(true)
+		expect(storageKeyIndex?.config.unique).toBe(true)
 		expect(
-			uploadKeyIndex?.config.columns.map((column) => ("name" in column ? column.name : undefined)),
-		).toEqual(["upload_thing_key"])
+			storageKeyIndex?.config.columns.map((column) => ("name" in column ? column.name : undefined)),
+		).toEqual(["storage_key"])
 		expect(runPathIndex?.config.unique).toBe(true)
 		expect(
 			runPathIndex?.config.columns.map((column) => ("name" in column ? column.name : undefined)),
@@ -400,11 +400,11 @@ describe("database schema foundation", () => {
 		const config = getTableConfig(auditEvent)
 
 		expect(config.name).toBe("audit_event")
-		expect(config.schema).toBe("sandhost")
+		expect(config.schema).toBe("sando")
 		expect(columns.id.primary).toBe(true)
 		expect(columns.type.notNull).toBe(true)
 		expect(columns.type.getSQLType()).toBe("audit_event_type")
-		expect(auditEventTypeEnum.schema).toBe("sandhost")
+		expect(auditEventTypeEnum.schema).toBe("sando")
 		expect(auditEventTypeEnum.enumValues).toEqual([
 			"agent.registered",
 			"host.registered",

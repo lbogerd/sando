@@ -1,7 +1,0 @@
-{
-	"extends": "../../configs/react.tsconfig.json",
-	"compilerOptions": {
-		"rootDir": "src"
-	},
-	"include": ["src/**/*.ts", "src/**/*.tsx"]
-}

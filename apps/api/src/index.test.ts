@@ -55,7 +55,7 @@ describe("hosted API app", () => {
 
 		expect(response.status).toBe(200)
 		expect(body).toMatchObject({
-			service: "sandhost-control-plane",
+			service: "sando-control-plane",
 			version: apiVersion,
 			status: "ok",
 			metadata: {

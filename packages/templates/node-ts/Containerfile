@@ -1,19 +1,19 @@
 FROM docker.io/library/node:lts-bookworm
 
-LABEL org.opencontainers.image.title="sandhost node-ts runtime"
-LABEL org.opencontainers.image.description="Local sandhost runtime template for Node.js and TypeScript projects"
+LABEL org.opencontainers.image.title="sando node-ts runtime"
+LABEL org.opencontainers.image.description="Local sando runtime template for Node.js and TypeScript projects"
 
 ARG PNPM_VERSION=10.30.3
-ARG SANDHOST_UID=10001
-ARG SANDHOST_GID=10001
+ARG SANDO_UID=10001
+ARG SANDO_GID=10001
 
 ENV CI=true \
 	SHELL=/bin/bash \
-	SANDHOST_TEMPLATE=node-ts \
-	SANDHOST_WORKSPACE=/workspace \
-	SANDHOST_ARTIFACTS=/artifacts \
-	PNPM_HOME=/home/sandhost/.local/share/pnpm \
-	PATH=/home/sandhost/.local/share/pnpm:$PATH
+	SANDO_TEMPLATE=node-ts \
+	SANDO_WORKSPACE=/workspace \
+	SANDO_ARTIFACTS=/artifacts \
+	PNPM_HOME=/home/sando/.local/share/pnpm \
+	PATH=/home/sando/.local/share/pnpm:$PATH
 
 RUN apt-get update \
 	&& apt-get install --no-install-recommends -y \
@@ -31,17 +31,17 @@ RUN apt-get update \
 
 RUN npm install --global "pnpm@${PNPM_VERSION}" \
 	&& npm cache clean --force \
-	&& groupadd --gid "${SANDHOST_GID}" sandhost \
-	&& useradd --create-home --shell /bin/bash --uid "${SANDHOST_UID}" --gid "${SANDHOST_GID}" sandhost \
-	&& mkdir -p /workspace /artifacts /sandhost/runner \
-	&& chown -R sandhost:sandhost /workspace /artifacts /sandhost /home/sandhost
+	&& groupadd --gid "${SANDO_GID}" sando \
+	&& useradd --create-home --shell /bin/bash --uid "${SANDO_UID}" --gid "${SANDO_GID}" sando \
+	&& mkdir -p /workspace /artifacts /sando/runner \
+	&& chown -R sando:sando /workspace /artifacts /sando /home/sando
 
-COPY --chown=sandhost:sandhost rootfs/sandhost/runner/run.sh /sandhost/runner/run.sh
+COPY --chown=sando:sando rootfs/sando/runner/run.sh /sando/runner/run.sh
 
-RUN chmod 0755 /sandhost/runner/run.sh
+RUN chmod 0755 /sando/runner/run.sh
 
 WORKDIR /workspace
 
-USER sandhost
+USER sando
 
-CMD ["/sandhost/runner/run.sh"]
+CMD ["/sando/runner/run.sh"]

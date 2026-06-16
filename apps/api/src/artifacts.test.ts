@@ -15,7 +15,7 @@ const artifact = {
 	path: "/artifacts/changed-files.txt",
 	contentType: "text/plain",
 	sizeBytes: 128,
-	uploadThingKey: "ut_123",
+	storageKey: "store_123",
 	private: true as const,
 	createdAt: "2026-06-14T18:00:00.000Z",
 }
@@ -67,7 +67,7 @@ describe("artifact API routes", () => {
 					path: "/artifacts/changed-files.txt",
 					contentType: "text/plain",
 					sizeBytes: 128,
-					uploadThingKey: "ut_123",
+					storageKey: "store_123",
 					private: true,
 					createdAt: "2026-06-14T18:00:00.000Z",
 				},

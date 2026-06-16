@@ -1,25 +1,23 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process"
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { basename, dirname, join, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
 
 import { startStdioServer } from "@sando/mcp"
 import {
 	defaultSandoPolicy,
-	parseRunProjectCommandInput,
 	runProjectCommandInputMetadata,
 	sandoPolicyMetadata,
 	type NetworkMode,
 } from "@sando/shared"
 
-export const appName = "sandhost"
+export const appName = "sando"
 export const cliVersion = "0.0.0"
-export const defaultSessionFile = ".sandhost/.env"
-export const defaultProjectFile = ".sandhost/project.json"
-export const defaultPolicyFile = ".sandhost/policy.json"
-export const codexMcpServerName = "sandhost"
-export const defaultCodexMcpCommand = ["npx", "-y", "@sandhost/cli", "mcp"] as const
+export const defaultProjectFile = ".sando/project.json"
+export const defaultPolicyFile = ".sando/policy.json"
+export const codexMcpServerName = "sando"
+export const defaultCodexMcpCommand = ["npx", "-y", "@sando/cli", "mcp"] as const
 
 export type CliResult = {
 	readonly exitCode: number
@@ -27,29 +25,9 @@ export type CliResult = {
 	readonly stdout: string
 }
 
-type RunCommandOptions = {
-	readonly command?: string
-	readonly network?: string
-	readonly template?: string
-	readonly timeoutSeconds?: number
-}
-
 type InitCommandOptions = {
 	readonly codex: boolean
 	readonly projectRoot?: string
-}
-
-export type LocalAuthSession = {
-	readonly apiUrl?: string
-	readonly token: string
-	readonly userId?: string
-}
-
-type AuthCommandOptions = {
-	readonly apiUrl?: string
-	readonly sessionFile?: string
-	readonly token?: string
-	readonly userId?: string
 }
 
 export type SyncCommandResult = {
@@ -65,7 +43,7 @@ export type SyncCommandRunner = (
 	options: { readonly cwd: string },
 ) => SyncCommandResult
 
-export type InitializeSandhostProjectOptions = {
+export type InitializeSandoProjectOptions = {
 	readonly codex?: boolean
 	readonly codexCommand?: string
 	readonly env?: NodeJS.ProcessEnv
@@ -75,7 +53,7 @@ export type InitializeSandhostProjectOptions = {
 	readonly runCommand?: SyncCommandRunner
 }
 
-export type InitializeSandhostProjectResult = {
+export type InitializeSandoProjectResult = {
 	readonly agents: FileInitStatus
 	readonly codex: CodexMcpInitStatus
 	readonly policy: FileInitStatus
@@ -126,16 +104,10 @@ export function runCli(
 			return success(`${JSON.stringify(doctorReport(env), null, 2)}\n`)
 		case "init":
 			return initCommand(args, env)
-		case "auth":
-			return authCommand(args, env)
-		case "login":
-			return authSaveCommand(args, env)
 		case "policy":
 			return policyCommand(args)
 		case "mcp":
 			return mcpCommand(args)
-		case "run":
-			return runCommand(args)
 		default:
 			return failure(64, `Unknown command: ${command}\n\n${helpText()}`)
 	}
@@ -153,7 +125,7 @@ function initCommand(args: readonly string[], env: NodeJS.ProcessEnv): CliResult
 	}
 
 	try {
-		const result = initializeSandhostProject({
+		const result = initializeSandoProject({
 			codex: parsed.value.codex,
 			env,
 			...(parsed.value.projectRoot === undefined ? {} : { projectRoot: parsed.value.projectRoot }),
@@ -214,14 +186,14 @@ function parseInitArgs(
 	return { ok: true, value: options }
 }
 
-export function initializeSandhostProject(
-	options: InitializeSandhostProjectOptions = {},
-): InitializeSandhostProjectResult {
+export function initializeSandoProject(
+	options: InitializeSandoProjectOptions = {},
+): InitializeSandoProjectResult {
 	const env = options.env ?? process.env
 	const projectRoot = resolve(options.projectRoot ?? process.cwd())
 	const now = options.now ?? new Date()
 
-	mkdirSync(join(projectRoot, ".sandhost"), { recursive: true })
+	mkdirSync(join(projectRoot, ".sando"), { recursive: true })
 
 	const project = writeJsonFileIfMissing(
 		join(projectRoot, defaultProjectFile),
@@ -233,10 +205,10 @@ export function initializeSandhostProject(
 		options.codex === true
 			? configureCodexMcp({
 					projectRoot,
-					...optionalString("codexCommand", options.codexCommand ?? env.SANDHOST_CODEX_BIN),
+					...optionalString("codexCommand", options.codexCommand ?? env.SANDO_CODEX_BIN),
 					...optionalStringArray(
 						"mcpCommand",
-						options.mcpCommand ?? parseCommandEnv(env.SANDHOST_CODEX_MCP_COMMAND),
+						options.mcpCommand ?? parseCommandEnv(env.SANDO_CODEX_MCP_COMMAND),
 					),
 					...(options.runCommand === undefined ? {} : { runCommand: options.runCommand }),
 				})
@@ -294,7 +266,7 @@ function writeJsonFileIfMissing(path: string, value: unknown): FileInitStatus {
 export function upsertAgentsFile(path: string): FileInitStatus {
 	const existed = existsSync(path)
 	const current = existed ? readFileSync(path, "utf8") : ""
-	const next = upsertSandhostAgentsSection(current)
+	const next = upsertSandoAgentsSection(current)
 
 	if (current === next) {
 		return { path, status: "exists" }
@@ -305,9 +277,9 @@ export function upsertAgentsFile(path: string): FileInitStatus {
 	return { path, status: existed ? "updated" : "created" }
 }
 
-export function upsertSandhostAgentsSection(content: string): string {
-	const section = sandhostAgentsSection()
-	const markerPattern = /<!-- sandhost:start -->[\s\S]*?<!-- sandhost:end -->/u
+export function upsertSandoAgentsSection(content: string): string {
+	const section = sandoAgentsSection()
+	const markerPattern = /<!-- sando:start -->[\s\S]*?<!-- sando:end -->/u
 
 	if (markerPattern.test(content)) {
 		return content.replace(markerPattern, section)
@@ -322,20 +294,19 @@ export function upsertSandhostAgentsSection(content: string): string {
 	return `${prefix}\n\n${section}\n`
 }
 
-function sandhostAgentsSection(): string {
+function sandoAgentsSection(): string {
 	return [
-		"<!-- sandhost:start -->",
-		"## sandhost",
+		"<!-- sando:start -->",
+		"## sando",
 		"",
-		"Use sandhost for commands that may execute generated, dependency-installing, destructive, or risky code.",
+		"Use sando for commands that may execute generated, dependency-installing, destructive, or risky code.",
 		"",
 		"Prefer:",
 		"",
-		"- `sandhost_run_project_command` through MCP",
-		'- `sandhost run "<command>"` as a CLI fallback',
+		"- `sando_run_project_command` through MCP",
 		"",
 		"Do not apply sandbox changes to the local repo automatically. Inspect `diff.patch` first.",
-		"<!-- sandhost:end -->",
+		"<!-- sando:end -->",
 	].join("\n")
 }
 
@@ -421,7 +392,7 @@ function nodeErrorCode(error: Error): string | undefined {
 
 function mcpCommand(args: readonly string[]): CliResult {
 	if (args.length === 0) {
-		return success("sandhost MCP server runs over stdio.\n")
+		return success("sando MCP server runs over stdio.\n")
 	}
 
 	if (args.length === 1 && (args[0] === "--help" || args[0] === "-h" || args[0] === "help")) {
@@ -429,191 +400,6 @@ function mcpCommand(args: readonly string[]): CliResult {
 	}
 
 	return failure(64, `Unknown mcp option: ${args.join(" ")}\n\n${mcpHelpText()}`)
-}
-
-function authCommand(args: readonly string[], env: NodeJS.ProcessEnv): CliResult {
-	const [subcommand = "help", ...rest] = args
-
-	switch (subcommand) {
-		case "save":
-			return authSaveCommand(rest, env)
-		case "show":
-			return authShowCommand(rest, env)
-		case "clear":
-			return authClearCommand(rest, env)
-		case "help":
-		case "--help":
-		case "-h":
-			return success(authHelpText())
-		default:
-			return failure(64, `Unknown auth command: ${subcommand}\n\n${authHelpText()}`)
-	}
-}
-
-function authSaveCommand(args: readonly string[], env: NodeJS.ProcessEnv): CliResult {
-	const parsed = parseAuthArgs(args)
-
-	if (!parsed.ok) {
-		return failure(64, `${parsed.error}\n`)
-	}
-
-	const token = parsed.value.token ?? env.SANDHOST_SESSION_TOKEN
-
-	if (token === undefined || token.trim().length === 0) {
-		return failure(64, "Expected --token or SANDHOST_SESSION_TOKEN.\n")
-	}
-
-	const apiUrl = parsed.value.apiUrl ?? env.SANDHOST_API_URL
-	const sessionFile = resolveSessionFile(parsed.value.sessionFile, env)
-	const session: LocalAuthSession = {
-		token,
-		...(apiUrl === undefined ? {} : { apiUrl }),
-		...(parsed.value.userId === undefined ? {} : { userId: parsed.value.userId }),
-	}
-
-	writeLocalAuthSession(sessionFile, session)
-
-	return success(`Saved sandhost auth session to ${sessionFile}\n`)
-}
-
-function authShowCommand(args: readonly string[], env: NodeJS.ProcessEnv): CliResult {
-	const parsed = parseAuthArgs(args)
-
-	if (!parsed.ok) {
-		return failure(64, `${parsed.error}\n`)
-	}
-
-	const sessionFile = resolveSessionFile(parsed.value.sessionFile, env)
-	const session = readLocalAuthSession(sessionFile)
-
-	return success(
-		`${JSON.stringify(
-			{
-				authenticated: session !== null,
-				sessionFile,
-				...(session === null
-					? {}
-					: {
-							apiUrl: session.apiUrl ?? null,
-							token: "set",
-							userId: session.userId ?? null,
-						}),
-			},
-			null,
-			2,
-		)}\n`,
-	)
-}
-
-function authClearCommand(args: readonly string[], env: NodeJS.ProcessEnv): CliResult {
-	const parsed = parseAuthArgs(args)
-
-	if (!parsed.ok) {
-		return failure(64, `${parsed.error}\n`)
-	}
-
-	const sessionFile = resolveSessionFile(parsed.value.sessionFile, env)
-
-	rmSync(sessionFile, { force: true })
-
-	return success(`Cleared sandhost auth session at ${sessionFile}\n`)
-}
-
-function parseAuthArgs(
-	args: readonly string[],
-):
-	| { readonly ok: true; readonly value: AuthCommandOptions }
-	| { readonly ok: false; readonly error: string } {
-	const options: {
-		apiUrl?: string
-		sessionFile?: string
-		token?: string
-		userId?: string
-	} = {}
-
-	for (let index = 0; index < args.length; index += 1) {
-		const arg = args[index]
-
-		if (arg === undefined) {
-			continue
-		}
-
-		if (arg === "--help" || arg === "-h") {
-			return { ok: false, error: authHelpText() }
-		}
-
-		if (arg === "--token") {
-			const value = args[index + 1]
-
-			if (value === undefined) {
-				return { ok: false, error: "Expected a value after --token." }
-			}
-
-			options.token = value
-			index += 1
-			continue
-		}
-
-		if (arg.startsWith("--token=")) {
-			options.token = arg.slice("--token=".length)
-			continue
-		}
-
-		if (arg === "--api-url") {
-			const value = args[index + 1]
-
-			if (value === undefined) {
-				return { ok: false, error: "Expected a value after --api-url." }
-			}
-
-			options.apiUrl = value
-			index += 1
-			continue
-		}
-
-		if (arg.startsWith("--api-url=")) {
-			options.apiUrl = arg.slice("--api-url=".length)
-			continue
-		}
-
-		if (arg === "--user-id") {
-			const value = args[index + 1]
-
-			if (value === undefined) {
-				return { ok: false, error: "Expected a value after --user-id." }
-			}
-
-			options.userId = value
-			index += 1
-			continue
-		}
-
-		if (arg.startsWith("--user-id=")) {
-			options.userId = arg.slice("--user-id=".length)
-			continue
-		}
-
-		if (arg === "--session-file") {
-			const value = args[index + 1]
-
-			if (value === undefined) {
-				return { ok: false, error: "Expected a value after --session-file." }
-			}
-
-			options.sessionFile = value
-			index += 1
-			continue
-		}
-
-		if (arg.startsWith("--session-file=")) {
-			options.sessionFile = arg.slice("--session-file=".length)
-			continue
-		}
-
-		return { ok: false, error: `Unknown auth option: ${arg}` }
-	}
-
-	return { ok: true, value: options }
 }
 
 function policyCommand(args: readonly string[]): CliResult {
@@ -633,159 +419,6 @@ function policyCommand(args: readonly string[]): CliResult {
 		default:
 			return failure(64, `Unknown policy command: ${subcommand}\n\n${policyHelpText()}`)
 	}
-}
-
-function runCommand(args: readonly string[]): CliResult {
-	if (args.includes("--help") || args.includes("-h")) {
-		return success(runHelpText())
-	}
-
-	const parsed = parseRunArgs(args)
-
-	if (!parsed.ok) {
-		return failure(64, `${parsed.error}\n`)
-	}
-
-	const input = parseRunProjectCommandInput(parsed.value)
-
-	if (!input.ok) {
-		return failure(
-			65,
-			`${input.error.code}: ${input.error.message}\n${JSON.stringify(input.error.details, null, 2)}\n`,
-		)
-	}
-
-	return success(
-		`${JSON.stringify(
-			{
-				command: input.value.command,
-				template: input.value.template ?? runProjectCommandInputMetadata.defaults.template,
-				network: input.value.network ?? runProjectCommandInputMetadata.defaults.network,
-				timeoutSeconds:
-					input.value.timeoutSeconds ?? runProjectCommandInputMetadata.defaults.timeoutSeconds,
-			},
-			null,
-			2,
-		)}\n`,
-	)
-}
-
-function parseRunArgs(
-	args: readonly string[],
-):
-	| { readonly ok: true; readonly value: RunCommandOptions }
-	| { readonly ok: false; readonly error: string } {
-	const options: {
-		command?: string
-		network?: string
-		template?: string
-		timeoutSeconds?: number
-	} = {}
-	const positional: string[] = []
-
-	for (let index = 0; index < args.length; index += 1) {
-		const arg = args[index]
-
-		if (arg === undefined) {
-			continue
-		}
-
-		if (arg === "--help" || arg === "-h") {
-			return { ok: false, error: runHelpText() }
-		}
-
-		if (arg === "--command") {
-			const value = args[index + 1]
-
-			if (value === undefined) {
-				return { ok: false, error: "Expected a value after --command." }
-			}
-
-			options.command = value
-			index += 1
-			continue
-		}
-
-		if (arg.startsWith("--command=")) {
-			options.command = arg.slice("--command=".length)
-			continue
-		}
-
-		if (arg === "--network") {
-			const value = args[index + 1]
-
-			if (value === undefined) {
-				return { ok: false, error: "Expected a value after --network." }
-			}
-
-			options.network = value
-			index += 1
-			continue
-		}
-
-		if (arg.startsWith("--network=")) {
-			options.network = arg.slice("--network=".length)
-			continue
-		}
-
-		if (arg === "--template") {
-			const value = args[index + 1]
-
-			if (value === undefined) {
-				return { ok: false, error: "Expected a value after --template." }
-			}
-
-			options.template = value
-			index += 1
-			continue
-		}
-
-		if (arg.startsWith("--template=")) {
-			options.template = arg.slice("--template=".length)
-			continue
-		}
-
-		if (arg === "--timeout") {
-			const value = args[index + 1]
-
-			if (value === undefined) {
-				return { ok: false, error: "Expected a value after --timeout." }
-			}
-
-			const timeoutSeconds = Number.parseInt(value, 10)
-
-			if (!Number.isFinite(timeoutSeconds)) {
-				return { ok: false, error: "Expected --timeout to be an integer number of seconds." }
-			}
-
-			options.timeoutSeconds = timeoutSeconds
-			index += 1
-			continue
-		}
-
-		if (arg.startsWith("--timeout=")) {
-			const timeoutSeconds = Number.parseInt(arg.slice("--timeout=".length), 10)
-
-			if (!Number.isFinite(timeoutSeconds)) {
-				return { ok: false, error: "Expected --timeout to be an integer number of seconds." }
-			}
-
-			options.timeoutSeconds = timeoutSeconds
-			continue
-		}
-
-		if (arg.startsWith("-")) {
-			return { ok: false, error: `Unknown run option: ${arg}` }
-		}
-
-		positional.push(arg)
-	}
-
-	if (options.command === undefined && positional.length > 0) {
-		options.command = positional.join(" ")
-	}
-
-	return { ok: true, value: options }
 }
 
 function statusText(): string {
@@ -810,11 +443,10 @@ function doctorReport(env: NodeJS.ProcessEnv): {
 			readonly stderr: string
 			readonly stdout: string
 		}
-		readonly sandhostConfigured: boolean | null
+		readonly sandoConfigured: boolean | null
 	}
 	readonly defaultNetwork: NetworkMode
 	readonly platform: NodeJS.Platform
-	readonly sessionFile: string
 	readonly wsl: {
 		readonly detected: boolean
 		readonly distroName?: string
@@ -826,10 +458,9 @@ function doctorReport(env: NodeJS.ProcessEnv): {
 			detected: env.WSL_DISTRO_NAME !== undefined || env.WSL_INTEROP !== undefined,
 			...(env.WSL_DISTRO_NAME === undefined ? {} : { distroName: env.WSL_DISTRO_NAME }),
 		},
-		apiUrl: env.SANDHOST_API_URL ?? null,
+		apiUrl: env.SANDO_API_URL ?? null,
 		codex: codexDoctorReport(env),
 		defaultNetwork: runProjectCommandInputMetadata.defaults.network,
-		sessionFile: resolveSessionFile(undefined, env),
 	}
 }
 
@@ -841,16 +472,16 @@ function codexDoctorReport(env: NodeJS.ProcessEnv): {
 		readonly stderr: string
 		readonly stdout: string
 	}
-	readonly sandhostConfigured: boolean | null
+	readonly sandoConfigured: boolean | null
 } {
-	const command = env.SANDHOST_CODEX_BIN ?? "codex"
+	const command = env.SANDO_CODEX_BIN ?? "codex"
 	const result = runSyncCommand(command, ["mcp", "list"], { cwd: process.cwd() })
 
 	if (result.error !== undefined && nodeErrorCode(result.error) === "ENOENT") {
 		return {
 			available: false,
 			command,
-			sandhostConfigured: null,
+			sandoConfigured: null,
 		}
 	}
 
@@ -864,144 +495,42 @@ function codexDoctorReport(env: NodeJS.ProcessEnv): {
 			stderr: result.stderr,
 			stdout: result.stdout,
 		},
-		sandhostConfigured: output.includes(codexMcpServerName),
+		sandoConfigured: output.includes(codexMcpServerName),
 	}
-}
-
-function resolveSessionFile(value: string | undefined, env: NodeJS.ProcessEnv): string {
-	return resolve(value ?? env.SANDHOST_SESSION_FILE ?? defaultSessionFile)
-}
-
-export function writeLocalAuthSession(path: string, session: LocalAuthSession): void {
-	mkdirSync(dirname(path), { recursive: true })
-	writeFileSync(path, formatSessionEnv(session), { mode: 0o600 })
-	chmodSync(path, 0o600)
-}
-
-export function readLocalAuthSession(path: string): LocalAuthSession | null {
-	if (!existsSync(path)) {
-		return null
-	}
-
-	const values = parseSessionEnv(readFileSync(path, "utf8"))
-	const token = values.SANDHOST_SESSION_TOKEN
-
-	if (token === undefined || token.trim().length === 0) {
-		return null
-	}
-
-	return {
-		token,
-		...(values.SANDHOST_API_URL === undefined ? {} : { apiUrl: values.SANDHOST_API_URL }),
-		...(values.SANDHOST_USER_ID === undefined ? {} : { userId: values.SANDHOST_USER_ID }),
-	}
-}
-
-export function formatSessionEnv(session: LocalAuthSession): string {
-	return [
-		"# sandhost local auth session",
-		`SANDHOST_SESSION_TOKEN=${quoteEnvValue(session.token)}`,
-		...(session.apiUrl === undefined ? [] : [`SANDHOST_API_URL=${quoteEnvValue(session.apiUrl)}`]),
-		...(session.userId === undefined ? [] : [`SANDHOST_USER_ID=${quoteEnvValue(session.userId)}`]),
-		"",
-	].join("\n")
-}
-
-function parseSessionEnv(content: string): Record<string, string> {
-	const values: Record<string, string> = {}
-
-	for (const line of content.split(/\r?\n/u)) {
-		const trimmed = line.trim()
-
-		if (trimmed.length === 0 || trimmed.startsWith("#")) {
-			continue
-		}
-
-		const equalsIndex = trimmed.indexOf("=")
-
-		if (equalsIndex === -1) {
-			continue
-		}
-
-		const key = trimmed.slice(0, equalsIndex).trim()
-		const rawValue = trimmed.slice(equalsIndex + 1).trim()
-
-		values[key] = unquoteEnvValue(rawValue)
-	}
-
-	return values
-}
-
-function quoteEnvValue(value: string): string {
-	return JSON.stringify(value)
-}
-
-function unquoteEnvValue(value: string): string {
-	if (value.startsWith('"')) {
-		try {
-			const parsed: unknown = JSON.parse(value)
-
-			return typeof parsed === "string" ? parsed : value
-		} catch {
-			return value
-		}
-	}
-
-	return value
 }
 
 function helpText(): string {
-	return `sandhost ${cliVersion}
+	return `sando ${cliVersion}
 
 Usage:
-  sandhost help
-  sandhost version
-  sandhost status
-  sandhost doctor
-  sandhost init --codex
-  sandhost auth save --token <token> [--api-url https://api.example] [--user-id user_123]
-  sandhost auth show
-  sandhost auth clear
-  sandhost policy defaults
-  sandhost mcp
-  sandhost run --command "pnpm test" [--network none|default] [--template node-ts] [--timeout 600]
+  sando help
+  sando version
+  sando status
+  sando doctor
+  sando init --codex
+  sando policy defaults
+  sando mcp
 
 `
 }
 
 function initHelpText(): string {
 	return `Usage:
-  sandhost init [--codex] [--project-root <path>]
-
-`
-}
-
-function authHelpText(): string {
-	return `Usage:
-  sandhost auth save --token <token> [--api-url https://api.example] [--user-id user_123] [--session-file .sandhost/.env]
-  sandhost auth show [--session-file .sandhost/.env]
-  sandhost auth clear [--session-file .sandhost/.env]
+  sando init [--codex] [--project-root <path>]
 
 `
 }
 
 function policyHelpText(): string {
 	return `Usage:
-  sandhost policy defaults
+  sando policy defaults
 
 `
 }
 
 function mcpHelpText(): string {
 	return `Usage:
-  sandhost mcp
-
-`
-}
-
-function runHelpText(): string {
-	return `Usage:
-  sandhost run --command "pnpm test" [--network none|default] [--template node-ts] [--timeout 600]
+  sando mcp
 
 `
 }

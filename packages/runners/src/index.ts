@@ -56,7 +56,7 @@ import {
 
 export const packageName = "runners"
 
-export const projectPolicyFilePath = ".sandhost/policy.json"
+export const projectPolicyFilePath = ".sando/policy.json"
 export const gitArchiveFileSelectionArgs = [
 	"ls-files",
 	"-z",
@@ -187,12 +187,12 @@ export type HostedAgentAuthorityOptions = {
 }
 
 export type HostedAgentAuthorityEnvironment = {
-	readonly SANDHOST_AGENT_ID?: string
-	readonly SANDHOST_API_URL?: string
-	readonly SANDHOST_HOST_ID?: string
-	readonly SANDHOST_OPEN_APPROVAL?: string
-	readonly SANDHOST_PROJECT_ID?: string
-	readonly SANDHOST_SESSION_TOKEN?: string
+	readonly SANDO_AGENT_ID?: string
+	readonly SANDO_API_URL?: string
+	readonly SANDO_HOST_ID?: string
+	readonly SANDO_OPEN_APPROVAL?: string
+	readonly SANDO_PROJECT_ID?: string
+	readonly SANDO_SESSION_TOKEN?: string
 }
 
 export const policyConstraintsSchema = z.object({
@@ -448,22 +448,22 @@ export function createHostedAgentAuthorityFromEnv(
 	env: HostedAgentAuthorityEnvironment = process.env,
 ): AgentAuthority | undefined {
 	if (
-		env.SANDHOST_API_URL === undefined ||
-		env.SANDHOST_SESSION_TOKEN === undefined ||
-		env.SANDHOST_PROJECT_ID === undefined ||
-		env.SANDHOST_HOST_ID === undefined ||
-		env.SANDHOST_AGENT_ID === undefined
+		env.SANDO_API_URL === undefined ||
+		env.SANDO_SESSION_TOKEN === undefined ||
+		env.SANDO_PROJECT_ID === undefined ||
+		env.SANDO_HOST_ID === undefined ||
+		env.SANDO_AGENT_ID === undefined
 	) {
 		return undefined
 	}
 
 	return new HostedAgentAuthority({
-		apiUrl: env.SANDHOST_API_URL,
-		token: env.SANDHOST_SESSION_TOKEN,
-		projectId: asId("project", env.SANDHOST_PROJECT_ID),
-		hostId: asId("host", env.SANDHOST_HOST_ID),
-		agentId: asId("agent", env.SANDHOST_AGENT_ID),
-		...(env.SANDHOST_OPEN_APPROVAL === "0"
+		apiUrl: env.SANDO_API_URL,
+		token: env.SANDO_SESSION_TOKEN,
+		projectId: asId("project", env.SANDO_PROJECT_ID),
+		hostId: asId("host", env.SANDO_HOST_ID),
+		agentId: asId("agent", env.SANDO_AGENT_ID),
+		...(env.SANDO_OPEN_APPROVAL === "0"
 			? {
 					openApprovalUrl: () => undefined,
 				}
@@ -537,7 +537,7 @@ export async function loadProjectPolicy(
 		return err(
 			sandoError({
 				code: "VALIDATION_FAILED",
-				message: "Invalid sandhost policy file.",
+				message: "Invalid sando policy file.",
 				details: { path: policyPath },
 				cause: policy.error,
 			}),
@@ -684,9 +684,15 @@ export async function selectArchiveFiles(
 			maxBuffer: 128 * 1024 * 1024,
 		})
 
+		const excludePatterns = await archiveExcludePatternsForProjectRoot(projectRoot.value)
+
+		if (!excludePatterns.ok) {
+			return excludePatterns
+		}
+
 		return ok({
 			projectRoot: projectRoot.value,
-			files: [...filterSensitiveArchiveFiles(parseGitNullDelimitedPaths(stdout))],
+			files: [...filterArchiveFiles(parseGitNullDelimitedPaths(stdout), excludePatterns.value)],
 		})
 	} catch (error) {
 		if (!isExecFileError(error)) {
@@ -707,6 +713,42 @@ export async function selectArchiveFiles(
 			}),
 		)
 	}
+}
+
+async function archiveExcludePatternsForProjectRoot(
+	projectRoot: string,
+): Promise<Result<readonly string[]>> {
+	const policyPath = join(projectRoot, projectPolicyFilePath)
+	const file = await readTextFile(policyPath)
+
+	if (!file.ok) {
+		if (file.error.code === "NOT_FOUND") {
+			return ok(defaultSandoPolicy.exclude)
+		}
+
+		return file
+	}
+
+	const json = parseJsonFile(file.value, policyPath)
+
+	if (!json.ok) {
+		return json
+	}
+
+	const policy = parseSandoPolicy(json.value)
+
+	if (!policy.ok) {
+		return err(
+			sandoError({
+				code: "VALIDATION_FAILED",
+				message: "Invalid sando policy file.",
+				details: { path: policyPath },
+				cause: policy.error,
+			}),
+		)
+	}
+
+	return ok(uniqueStrings([...defaultSandoPolicy.exclude, ...policy.value.exclude]))
 }
 
 export async function runProjectCommand(
@@ -869,27 +911,27 @@ export async function readRunResult(input: {
 }
 
 export function runLogsRef(runId: RunId | string): SandoUri {
-	return `sandhost://runs/${runId}/logs`
+	return `sando://runs/${runId}/logs`
 }
 
 export function runDiffRef(runId: RunId | string): SandoUri {
-	return `sandhost://runs/${runId}/diff`
+	return `sando://runs/${runId}/diff`
 }
 
 export function runStdoutRef(runId: RunId | string): SandoUri {
-	return `sandhost://runs/${runId}/stdout`
+	return `sando://runs/${runId}/stdout`
 }
 
 export function runStderrRef(runId: RunId | string): SandoUri {
-	return `sandhost://runs/${runId}/stderr`
+	return `sando://runs/${runId}/stderr`
 }
 
 export function runChangedFilesRef(runId: RunId | string): SandoUri {
-	return `sandhost://runs/${runId}/changed-files`
+	return `sando://runs/${runId}/changed-files`
 }
 
 export function runAuditRef(runId: RunId | string): SandoUri {
-	return `sandhost://runs/${runId}/audit`
+	return `sando://runs/${runId}/audit`
 }
 
 export function artifactIdForRunArtifact(runId: RunId | string, name: string): string {
@@ -949,7 +991,7 @@ async function parseJsonResponse<Value>(
 			error ??
 				sandoError({
 					code: "INTERNAL",
-					message: `Hosted sandhost request failed with HTTP ${response.status}.`,
+					message: `Hosted sando request failed with HTTP ${response.status}.`,
 				}),
 		)
 	}
@@ -958,7 +1000,7 @@ async function parseJsonResponse<Value>(
 		return err(
 			sandoError({
 				code: "INTERNAL",
-				message: "Hosted sandhost response did not contain JSON.",
+				message: "Hosted sando response did not contain JSON.",
 			}),
 		)
 	}
@@ -1061,6 +1103,15 @@ export function filterSensitiveArchiveFiles(files: readonly string[]): readonly 
 	return files.filter((path) => !isSensitiveArchiveFilePath(path))
 }
 
+export function filterArchiveFiles(
+	files: readonly string[],
+	excludePatterns: readonly string[],
+): readonly string[] {
+	return filterSensitiveArchiveFiles(files).filter(
+		(path) => !isPolicyExcludedArchiveFilePath(path, excludePatterns),
+	)
+}
+
 export function isSensitiveArchiveFilePath(path: string): boolean {
 	const normalizedPath = normalizeArchivePath(path)
 	const segments = normalizedPath.split("/")
@@ -1086,6 +1137,62 @@ export function isSensitiveArchiveFilePath(path: string): boolean {
 		(sensitivePath) =>
 			normalizedPath === sensitivePath || normalizedPath.endsWith(`/${sensitivePath}`),
 	)
+}
+
+function isPolicyExcludedArchiveFilePath(
+	path: string,
+	excludePatterns: readonly string[],
+): boolean {
+	const normalizedPath = normalizeArchivePath(path)
+
+	return excludePatterns.some((pattern) => archiveExcludePatternMatches(pattern, normalizedPath))
+}
+
+function archiveExcludePatternMatches(pattern: string, normalizedPath: string): boolean {
+	const normalizedPattern = normalizeArchivePath(pattern)
+
+	if (normalizedPattern.length === 0) {
+		return false
+	}
+
+	if (!normalizedPattern.includes("*")) {
+		return (
+			normalizedPath === normalizedPattern ||
+			normalizedPath.startsWith(`${normalizedPattern}/`) ||
+			normalizedPath.endsWith(`/${normalizedPattern}`) ||
+			normalizedPath.includes(`/${normalizedPattern}/`)
+		)
+	}
+
+	return archiveGlobToRegExp(normalizedPattern).test(normalizedPath)
+}
+
+function archiveGlobToRegExp(pattern: string): RegExp {
+	let source = "^"
+
+	for (let index = 0; index < pattern.length; index += 1) {
+		const character = pattern[index]
+
+		if (character === "*") {
+			if (pattern[index + 1] === "*") {
+				source += ".*"
+				index += 1
+			} else {
+				source += "[^/]*"
+			}
+			continue
+		}
+
+		source += escapeRegExp(character ?? "")
+	}
+
+	source += "$"
+
+	return new RegExp(source, "u")
+}
+
+function escapeRegExp(value: string): string {
+	return value.replace(/[\\^$+?.()|[\]{}]/gu, "\\$&")
 }
 
 function stringListIncludes(values: readonly string[], value: string): boolean {
@@ -1135,7 +1242,7 @@ async function createWorkspaceSnapshot(
 
 async function createTempWorkspaceRoot(runId: RunId): Promise<Result<string>> {
 	try {
-		return ok(await mkdtemp(join(tmpdir(), `sandhost-${runId}-`)))
+		return ok(await mkdtemp(join(tmpdir(), `sando-${runId}-`)))
 	} catch (error) {
 		return fileSystemFailure("Could not create temporary workspace snapshot.", error, {
 			runId: String(runId),
@@ -1200,7 +1307,7 @@ function summarizeRun(input: {
 }
 
 function artifactUri(runId: RunId, name: string): SandoUri {
-	return `sandhost://artifacts/${artifactIdForRunArtifact(runId, name)}`
+	return `sando://artifacts/${artifactIdForRunArtifact(runId, name)}`
 }
 
 async function readRunTextArtifact(
@@ -1229,10 +1336,10 @@ async function readRunArtifactById(
 		const runsRootEntries = await lstat(runsRootPath)
 
 		if (!runsRootEntries.isDirectory()) {
-			return notFound("Sandhost runs path is not a directory.", { path: runsRootPath })
+			return notFound("Sando runs path is not a directory.", { path: runsRootPath })
 		}
 	} catch (error) {
-		return fileSystemFailure("Could not read sandhost runs path.", error, { path: runsRootPath })
+		return fileSystemFailure("Could not read runs path.", error, { path: runsRootPath })
 	}
 
 	const runDirectories = await listDirectoryNames(runsRootPath)
@@ -1256,7 +1363,7 @@ async function readRunArtifactById(
 		}
 	}
 
-	return notFound("Could not find sandhost artifact.", { artifactId })
+	return notFound("Could not find sando artifact.", { artifactId })
 }
 
 async function readNamedRunArtifact(
@@ -1273,7 +1380,7 @@ async function readNamedRunArtifact(
 	const artifact = artifacts.value.find((candidate) => candidate.name === name)
 
 	if (artifact === undefined) {
-		return notFound("Could not find sandhost run artifact.", { runId, name })
+		return notFound("Could not find run artifact.", { runId, name })
 	}
 
 	const content = await readTextFileContent(artifact.path)
@@ -1343,7 +1450,7 @@ async function readTextFileContent(path: string): Promise<Result<string>> {
 	try {
 		return ok(await readFile(path, "utf8"))
 	} catch (error) {
-		return fileSystemFailure("Could not read sandhost artifact.", error, { path })
+		return fileSystemFailure("Could not read sando artifact.", error, { path })
 	}
 }
 
@@ -1361,7 +1468,7 @@ async function readJsonFile(path: string): Promise<Result<unknown>> {
 			return err(
 				sandoError({
 					code: "VALIDATION_FAILED",
-					message: "Sandhost JSON artifact contains invalid JSON.",
+					message: "Sando JSON artifact contains invalid JSON.",
 					details: { path, message: error.message },
 				}),
 			)
@@ -1573,7 +1680,7 @@ async function readTextFile(path: string): Promise<Result<string>> {
 			return err(
 				sandoError({
 					code: "NOT_FOUND",
-					message: "Sandhost policy file does not exist.",
+					message: "Sando policy file does not exist.",
 					details: { path },
 				}),
 			)
@@ -1583,7 +1690,7 @@ async function readTextFile(path: string): Promise<Result<string>> {
 			return err(
 				sandoError({
 					code: "FORBIDDEN",
-					message: "Sandhost policy file is not readable.",
+					message: "Sando policy file is not readable.",
 					details: { path },
 				}),
 			)
@@ -1593,7 +1700,7 @@ async function readTextFile(path: string): Promise<Result<string>> {
 			return err(
 				sandoError({
 					code: "VALIDATION_FAILED",
-					message: "Sandhost policy path is not a file.",
+					message: "Sando policy path is not a file.",
 					details: { path },
 				}),
 			)
@@ -1611,7 +1718,7 @@ function parseJsonFile(content: string, path: string): Result<unknown> {
 			return err(
 				sandoError({
 					code: "VALIDATION_FAILED",
-					message: "Sandhost policy file contains invalid JSON.",
+					message: "Sando policy file contains invalid JSON.",
 					details: { path, message: error.message },
 				}),
 			)

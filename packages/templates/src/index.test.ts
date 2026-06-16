@@ -13,7 +13,7 @@ const nodeTsRunnerScriptPath = resolve(
 	packageRoot,
 	"node-ts",
 	"rootfs",
-	"sandhost",
+	"sando",
 	"runner",
 	"run.sh",
 )
@@ -49,17 +49,17 @@ describe("node-ts Containerfile", () => {
 	it("sets the expected sandbox directories and non-root user", async () => {
 		const containerfile = await readFile(nodeTsContainerfilePath, "utf8")
 
-		expect(containerfile).toContain("SANDHOST_WORKSPACE=/workspace")
-		expect(containerfile).toContain("SANDHOST_ARTIFACTS=/artifacts")
-		expect(containerfile).toContain("mkdir -p /workspace /artifacts /sandhost/runner")
+		expect(containerfile).toContain("SANDO_WORKSPACE=/workspace")
+		expect(containerfile).toContain("SANDO_ARTIFACTS=/artifacts")
+		expect(containerfile).toContain("mkdir -p /workspace /artifacts /sando/runner")
 		expect(containerfile).toContain(
-			"COPY --chown=sandhost:sandhost rootfs/sandhost/runner/run.sh /sandhost/runner/run.sh",
+			"COPY --chown=sando:sando rootfs/sando/runner/run.sh /sando/runner/run.sh",
 		)
-		expect(containerfile).toContain("chmod 0755 /sandhost/runner/run.sh")
+		expect(containerfile).toContain("chmod 0755 /sando/runner/run.sh")
 		expect(containerfile).toContain("useradd --create-home --shell /bin/bash")
 		expect(containerfile).toContain("WORKDIR /workspace")
-		expect(containerfile).toContain("USER sandhost")
-		expect(containerfile).toContain('CMD ["/sandhost/runner/run.sh"]')
+		expect(containerfile).toContain("USER sando")
+		expect(containerfile).toContain('CMD ["/sando/runner/run.sh"]')
 	})
 })
 
@@ -75,7 +75,7 @@ describe("node-ts sandbox runner script", () => {
 
 		await execFileAsync(
 			nodeTsRunnerScriptPath,
-			["bash", "-lc", 'pwd > "$SANDHOST_ARTIFACTS/pwd.txt"'],
+			["bash", "-lc", 'pwd > "$SANDO_ARTIFACTS/pwd.txt"'],
 			{
 				env: sandboxEnv(workspace, artifacts),
 			},
@@ -122,7 +122,7 @@ describe("node-ts sandbox runner script", () => {
 		)
 
 		await expect(git(workspace, ["log", "-1", "--format=%s%n%an%n%ae"])).resolves.toMatchObject({
-			stdout: "sandhost baseline\nsandhost\nsandhost@example.local\n",
+			stdout: "sando baseline\nsando\nsando@example.local\n",
 		})
 		await expect(git(workspace, ["show", "HEAD:source.txt"])).resolves.toMatchObject({
 			stdout: "before\n",
@@ -181,26 +181,26 @@ describe("node-ts sandbox runner script", () => {
 		)
 	})
 
-	it("runs SANDHOST_COMMAND when no argv command is provided", async () => {
+	it("runs SANDO_COMMAND when no argv command is provided", async () => {
 		const { artifacts, workspace } = await tempSandboxDirs()
 
 		await execFileAsync(nodeTsRunnerScriptPath, [], {
 			env: {
 				...sandboxEnv(workspace, artifacts),
-				SANDHOST_COMMAND: 'printf "ok" > "$SANDHOST_ARTIFACTS/result.txt"',
+				SANDO_COMMAND: 'printf "ok" > "$SANDO_ARTIFACTS/result.txt"',
 			},
 		})
 
 		await expect(readFile(join(artifacts, "result.txt"), "utf8")).resolves.toBe("ok")
 	})
 
-	it("captures SANDHOST_COMMAND stdout, stderr, and logs", async () => {
+	it("captures SANDO_COMMAND stdout, stderr, and logs", async () => {
 		const { artifacts, workspace } = await tempSandboxDirs()
 
 		const result = await execFileAsync(nodeTsRunnerScriptPath, [], {
 			env: {
 				...sandboxEnv(workspace, artifacts),
-				SANDHOST_COMMAND: 'printf "cmd-out\\n"; printf "cmd-err\\n" >&2',
+				SANDO_COMMAND: 'printf "cmd-out\\n"; printf "cmd-err\\n" >&2',
 			},
 		})
 
@@ -220,7 +220,7 @@ describe("node-ts sandbox runner script", () => {
 		await execFileAsync(nodeTsRunnerScriptPath, [], {
 			env: {
 				...sandboxEnv(workspace, artifacts),
-				SANDHOST_COMMAND: "true",
+				SANDO_COMMAND: "true",
 			},
 		})
 
@@ -228,7 +228,7 @@ describe("node-ts sandbox runner script", () => {
 			stdout: expect.stringMatching(/^[0-9a-f]{40}\n$/),
 		})
 		await expect(git(workspace, ["log", "-1", "--format=%s"])).resolves.toMatchObject({
-			stdout: "sandhost baseline\n",
+			stdout: "sando baseline\n",
 		})
 		await expect(readFile(join(artifacts, "diff.patch"), "utf8")).resolves.toBe("")
 		await expect(readFile(join(artifacts, "changed-files.txt"), "utf8")).resolves.toBe("")
@@ -268,8 +268,8 @@ async function tempSandboxDirs(): Promise<{ artifacts: string; workspace: string
 function sandboxEnv(workspace: string, artifacts: string): NodeJS.ProcessEnv {
 	return {
 		...process.env,
-		SANDHOST_WORKSPACE: workspace,
-		SANDHOST_ARTIFACTS: artifacts,
+		SANDO_WORKSPACE: workspace,
+		SANDO_ARTIFACTS: artifacts,
 	}
 }
 

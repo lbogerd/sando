@@ -1,8 +1,7 @@
-# sandhost CLI
+# Sando CLI
 
-The `@sando/cli` package contains the `sandhost` command-line entrypoint for
-local setup, diagnostics, auth session storage, policy inspection, and direct
-run-request validation.
+The `@sando/cli` package contains the private `sando` command-line entrypoint
+for local setup, diagnostics, policy inspection, and MCP startup.
 
 This package is still private inside the monorepo. During development, run it
 from the repository root:
@@ -20,119 +19,84 @@ TMPDIR=/tmp pnpm --filter @sando/cli exec tsx src/index.ts help
 ## Commands
 
 ```bash
-sandhost help
-sandhost version
-sandhost status
-sandhost doctor
-sandhost auth save --token <token> [--api-url https://api.example] [--user-id user_123]
-sandhost auth show
-sandhost auth clear
-sandhost policy defaults
-sandhost run --command "pnpm test" [--network none|default] [--template node-ts] [--timeout 600]
+sando help
+sando version
+sando status
+sando doctor
+sando init --codex
+sando policy defaults
+sando mcp
 ```
 
-`sandhost run` currently validates and normalizes the requested command, network,
-template, and timeout. It does not execute a Podman sandbox yet; that execution
-path belongs to the runner/MCP integration.
+Removed prototype command families: direct CLI execution, manual token
+save/show/clear, and standalone login.
 
-## Auth Sessions
+The MVP demo routes command execution through Codex MCP. Interactive login and
+identity setup should happen inside `sando init --codex`, not through manual
+local token commands.
 
-The CLI stores a local auth session in `.sandhost/.env` by default. Override the
-path with `--session-file` or `SANDHOST_SESSION_FILE`.
+## Init
 
-### Getting An Auth Token
-
-For the current local in-memory API, any non-empty token is enough for CLI
-session storage demos because the hosted API auth resolver is not wired to
-Better Auth sessions yet:
+`sando init --codex` currently creates local project files and configures Codex
+MCP when the Codex CLI is available:
 
 ```bash
-export SANDHOST_SESSION_TOKEN="dev-token"
-export SANDHOST_API_URL="http://localhost:3000"
+sando init --codex
 ```
 
-Once the hosted API is started with Better Auth and a database-backed auth
-adapter, create an email/password account and copy the returned `token`:
+Created or updated files:
+
+- `.sando/project.json`
+- `.sando/policy.json`
+- `AGENTS.md`
+
+The command also runs:
 
 ```bash
-export SANDHOST_API_URL="http://localhost:3000"
-
-export SANDHOST_SESSION_TOKEN="$(
-  curl -sS "$SANDHOST_API_URL/api/auth/sign-up/email" \
-    -H "content-type: application/json" \
-    -d '{"name":"Local Dev","email":"dev@example.test","password":"password123"}' \
-    | jq -r '.token'
-)"
+codex mcp add sando -- npx -y @sando/cli mcp
 ```
 
-For an existing account, sign in instead:
+Interactive hosted login and project/host/agent registration are Todo.
+
+## MCP
+
+`sando mcp` starts the stdio MCP server:
 
 ```bash
-export SANDHOST_SESSION_TOKEN="$(
-  curl -sS "$SANDHOST_API_URL/api/auth/sign-in/email" \
-    -H "content-type: application/json" \
-    -d '{"email":"dev@example.test","password":"password123"}' \
-    | jq -r '.token'
-)"
+sando mcp
 ```
 
-Both routes also set Better Auth session cookies; the CLI stores the JSON
-`token` value in `.sandhost/.env`.
+The primary execution tool is:
 
-Save a session:
-
-```bash
-sandhost auth save --token "$SANDHOST_SESSION_TOKEN" --api-url http://localhost:3000
-```
-
-Show session metadata without printing the token:
-
-```bash
-sandhost auth show
-```
-
-Clear the session:
-
-```bash
-sandhost auth clear
-```
-
-`sandhost login` is an alias for `sandhost auth save`. It reads
-`SANDHOST_SESSION_TOKEN` and `SANDHOST_API_URL` when flags are omitted:
-
-```bash
-SANDHOST_SESSION_TOKEN=dev-token SANDHOST_API_URL=http://localhost:3000 sandhost login
+```ts
+sando_run_project_command({
+	command: "pnpm test",
+	network: "none",
+	timeoutSeconds: 600,
+})
 ```
 
 ## Diagnostics
 
-`sandhost doctor` prints a small JSON report with the configured API URL, session
-file path, default network mode, platform, and WSL detection status:
+`sando doctor` prints a small JSON report with the configured API URL, default
+network mode, platform, WSL detection status, and Codex MCP config status:
 
 ```bash
-sandhost doctor
+sando doctor
 ```
 
-The report is intentionally lightweight. Podman runtime diagnostics currently
-live in the repo-local helper:
+Podman runtime diagnostics live in the repo-local helper:
 
 ```bash
 pnpm local:doctor
 ```
 
-## Policies And Runs
+## Policies
 
 Inspect default policy values:
 
 ```bash
-sandhost policy defaults
-```
-
-Validate a run request:
-
-```bash
-sandhost run --command "pnpm test"
-sandhost run pnpm test --network=default --timeout=120
+sando policy defaults
 ```
 
 Defaults are:

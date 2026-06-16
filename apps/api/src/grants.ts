@@ -698,10 +698,10 @@ function approvalPage(grant: GrantRecord): string {
 	}
 
 	return htmlDocument(
-		"Approve sandhost command",
+		"Approve sando command",
 		`
 			<main>
-				<h1>Codex wants to run a project command with sandhost.</h1>
+				<h1>Codex wants to run a project command with sando.</h1>
 				<dl>
 					<dt>Project</dt><dd>${escapeHtml(grant.projectId)}</dd>
 					<dt>Machine</dt><dd>${escapeHtml(grant.hostId)}</dd>
@@ -728,7 +728,7 @@ function approvalPage(grant: GrantRecord): string {
 
 function approvalMessagePage(message: string): string {
 	return htmlDocument(
-		"sandhost approval",
+		"sando approval",
 		`
 			<main>
 				<h1>${escapeHtml(message)}</h1>

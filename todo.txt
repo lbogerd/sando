@@ -1,86 +1,40 @@
-[x] Phase 0
--[x] Create pnpm monorepo
--[x] Add shared TypeScript config, eslint/biome, vitest
--[x] Add package skeletons
--[x] Define shared ID/result/error types
--[x] Define policy schema
--[x] Define SandboxRuntime interface
--[x] Define RunProjectCommand input/result schema
--[x] Add dev docs: architecture.md, local-dev.md
-[x] Phase 1
--[x] Implement project root detection
--[x] Implement .sandhost/policy.json loader
--[x] Implement effective policy compiler
--[x] Implement archive file selection using git ls-files -co --exclude-standard
--[x] Add hardcoded sensitive-file exclusions
--[x] Create node-ts Containerfile
--[x] Add sandbox runner script inside image
--[x] Implement Podman image build/pull path
--[x] Implement Podman create/run/destroy
--[x] Implement network modes: none/default
--[x] Implement CPU/memory flags
--[x] Implement timeout handling
--[x] Capture stdout/stderr/logs
--[x] Generate baseline git commit inside sandbox
--[x] Generate diff.patch and changed-files.txt
--[x] Copy artifacts to .sandhost/runs/<runId>
--[x] Write result.json
--[x] Add cleanup-on-error/finally handling
--[x] Add integration fixture repo
--[x] Add WSL/Podman diagnostics spike
-[x] Phase 2 - Hosted control plane metadata
--[x] Create hosted app | use Hono
--[x] Add database schema
--[x] Add Better Auth user login | make sure to update schema with better auth tables
--[x] Add Project table
--[x] Add Host table
--[x] Add Agent table
--[x] Add Grant table
--[x] Add Run table
--[x] Add Artifact table
--[x] Add AuditEvent table
--[x] Add API route: register/get project
--[x] Add API route: register host
--[x] Add API route: create run
--[x] Add API route: finish run
--[x] Add API route: append audit event
--[x] Add API route: list run artifacts
--[x] Implement @sandhost/cli | give it basic functionality. Do NOT worry about keeping parity with the test scripts
--[x] Store local auth session securely enough for MVP | .env is fine for the MVP
-[x] Phase 3 — Codex MCP integration | Codex currently supports MCP config via config.toml, and the CLI can manage MCP server entries with codex mcp add. Use that instead of hand-editing config unless it fails in diagnostics.
--[x] Implement @sandhost/mcp stdio server | Feel free to install pnpm dependencies if it's sensible to do so
--[x] Expose sandhost_run_project_command
--[x] Expose sandhost_list_templates
--[x] Expose sandhost_explain_policy
--[x] Expose sandhost_get_run
--[x] Expose sandhost_read_logs
--[x] Expose sandhost_get_diff
--[x] Expose sandhost_download_artifact
--[x] Implement sandhost mcp command
--[x] Implement sandhost init --codex
--[x] Use codex mcp add sandhost -- npx -y @sandhost/cli mcp where possible
--[x] Add project .sandhost/project.json
--[x] Add project .sandhost/policy.json
--[x] Add AGENTS.md insertion/update
--[x] Add mcp smoke test script
--[x] Add sandhost doctor checks for Codex MCP config
-[ ] Phase 5 — Agent Auth grants | target: Codex path requires scoped hosted approval before execution.
--[ ] Implement BetterAuthAgentAuthority adapter
--[x] Expose /.well-known/agent-configuration
--[x] Define MVP capability registry
--[ ] Register Codex agent identity
--[ ] Register local host identity
--[x] Create grant request API
--[x] Create approval page
--[x] Add Approve once
--[x] Add Approve for 30 minutes
--[x] Add Deny
--[x] Issue/check short-lived execution authority
--[x] Enforce constraints before local execution
--[x] Enforce projectId/hostId/agentId/template/runtime/network/timeout
--[x] Add command hash for one-shot grants
--[x] Add grant expiry/revocation handling
--[x] Add audit hooks for grant lifecycle
--[x] Update MCP tool to request grant before run
--[x] Add grant polling or device-flow-style waiting
--[x] Add clear error when approval is denied/expired
+# Current cleanup batch
+
+- [x] Anchor the project on the honest MVP demo shape.
+- [x] Treat `docs/high-level-design.md` as target design with status labels.
+- [x] Prefer hard cuts over compatibility aliases while the project is early.
+- [x] Fully rebrand to Sando.
+- [x] Remove the hosted dashboard prototype.
+- [x] Remove direct CLI execution.
+- [x] Remove manual CLI auth commands and standalone login.
+- [x] Remove manual approval and Codex MCP smoke prototype scripts.
+- [x] Remove vendor-specific artifact naming.
+- [x] Remove Playwright/browser artifact defaults from the MVP policy.
+- [x] Keep `pnpm local:doctor` and `pnpm local:smoke` as dev verification.
+- [x] Run repo checks after cleanup.
+
+# Next implementation batch
+
+- [ ] Add interactive hosted login to `sando init --codex`.
+- [ ] Register project identity during init.
+- [ ] Register local host identity during init.
+- [ ] Register Codex agent identity during init.
+- [ ] Persist init identity/config needed by the local MCP server.
+- [ ] Implement the Better Auth Agent Auth adapter.
+- [ ] Require Agent Auth for `sando_run_project_command`.
+- [ ] Remove or demote custom grant scaffolding once real Agent Auth covers the flow.
+- [ ] Create hosted run metadata before local execution.
+- [ ] Finish hosted run metadata after local execution.
+- [ ] Append hosted audit events for grant and run lifecycle.
+- [ ] Return a hosted audit ref in the MCP command result.
+
+# Later
+
+- [ ] Wire DB-backed repositories for hosted metadata.
+- [ ] Add private hosted artifact payload storage.
+- [ ] Revisit browser/Playwright runtime support.
+- [ ] Revisit dashboard or hosted web app.
+- [ ] Revisit direct CLI execution only if the in-agent flow proves insufficient.
+- [ ] Implement Docker and Kubernetes runtime adapters.
+- [ ] Add secrets policy and secret injection.
+- [ ] Add team/project administration flows.

@@ -7,9 +7,9 @@ import {
 	helpText,
 	parseDevArgs,
 	podmanPostgresRunArgs,
-} from "./sandhost-dev.mjs"
+} from "./sando-dev.mjs"
 
-describe("sandhost dev script", () => {
+describe("sando dev script", () => {
 	it("parses default options", () => {
 		expect(parseDevArgs([])).toEqual({
 			ok: true,
@@ -18,13 +18,13 @@ describe("sandhost dev script", () => {
 				apiHost: "127.0.0.1",
 				apiPort: 3000,
 				keepPodman: false,
-				postgresContainerName: "sandhost-postgres",
-				postgresDatabase: "sandhost",
+				postgresContainerName: "sando-postgres",
+				postgresDatabase: "sando",
 				postgresImage: "docker.io/library/postgres:16-alpine",
-				postgresPassword: "sandhost",
+				postgresPassword: "sando",
 				postgresPort: 54329,
-				postgresUser: "sandhost",
-				postgresVolume: "sandhost-postgres-data",
+				postgresUser: "sando",
+				postgresVolume: "sando-postgres-data",
 				skipApi: false,
 				skipPodman: false,
 			},
@@ -63,7 +63,7 @@ describe("sandhost dev script", () => {
 	})
 
 	it("builds a local database URL", () => {
-		expect(databaseUrl(devDefaults)).toBe("postgresql://sandhost:sandhost@127.0.0.1:54329/sandhost")
+		expect(databaseUrl(devDefaults)).toBe("postgresql://sando:sando@127.0.0.1:54329/sando")
 	})
 
 	it("does not overwrite explicit process env values", () => {
@@ -80,8 +80,8 @@ describe("sandhost dev script", () => {
 			DATABASE_URL: "postgresql://custom",
 			HOST: "0.0.0.0",
 			PORT: "4000",
-			SANDHOST_DEV_AUTH_TOKEN: "sandhost-dev-token",
-			SANDHOST_DEV_USER_ID: "user_dev",
+			SANDO_DEV_AUTH_TOKEN: "sando-dev-token",
+			SANDO_DEV_USER_ID: "user_dev",
 			TMPDIR: "/tmp",
 		})
 	})
@@ -92,24 +92,24 @@ describe("sandhost dev script", () => {
 			"--detach",
 			"--replace",
 			"--name",
-			"sandhost-postgres",
+			"sando-postgres",
 			"--publish",
 			"54329:5432",
 			"--env",
-			"POSTGRES_DB=sandhost",
+			"POSTGRES_DB=sando",
 			"--env",
-			"POSTGRES_PASSWORD=sandhost",
+			"POSTGRES_PASSWORD=sando",
 			"--env",
-			"POSTGRES_USER=sandhost",
+			"POSTGRES_USER=sando",
 			"--volume",
-			"sandhost-postgres-data:/var/lib/postgresql/data",
+			"sando-postgres-data:/var/lib/postgresql/data",
 			"docker.io/library/postgres:16-alpine",
 		])
 	})
 
 	it("prints root pnpm dev usage", () => {
 		expect(helpText()).toContain("pnpm dev")
-		expect(helpText()).toContain("Authorization: Bearer sandhost-dev-token")
+		expect(helpText()).toContain("Authorization: Bearer sando-dev-token")
 		expect(helpText()).toContain("--skip-podman")
 	})
 })

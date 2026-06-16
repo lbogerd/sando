@@ -9,15 +9,15 @@ export const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 export const devDefaults = {
 	apiHost: "127.0.0.1",
 	apiPort: 3000,
-	devAuthToken: "sandhost-dev-token",
+	devAuthToken: "sando-dev-token",
 	devUserId: "user_dev",
-	postgresContainerName: "sandhost-postgres",
-	postgresDatabase: "sandhost",
+	postgresContainerName: "sando-postgres",
+	postgresDatabase: "sando",
 	postgresImage: "docker.io/library/postgres:16-alpine",
-	postgresPassword: "sandhost",
+	postgresPassword: "sando",
 	postgresPort: 54329,
-	postgresUser: "sandhost",
-	postgresVolume: "sandhost-postgres-data",
+	postgresUser: "sando",
+	postgresVolume: "sando-postgres-data",
 }
 
 export function parseDevArgs(args) {
@@ -171,8 +171,8 @@ export function apiEnv(baseEnv, options) {
 		DATABASE_URL: baseEnv.DATABASE_URL ?? databaseUrl(options),
 		HOST: baseEnv.HOST ?? options.apiHost,
 		PORT: baseEnv.PORT ?? String(options.apiPort),
-		SANDHOST_DEV_AUTH_TOKEN: baseEnv.SANDHOST_DEV_AUTH_TOKEN ?? devDefaults.devAuthToken,
-		SANDHOST_DEV_USER_ID: baseEnv.SANDHOST_DEV_USER_ID ?? devDefaults.devUserId,
+		SANDO_DEV_AUTH_TOKEN: baseEnv.SANDO_DEV_AUTH_TOKEN ?? devDefaults.devAuthToken,
+		SANDO_DEV_USER_ID: baseEnv.SANDO_DEV_USER_ID ?? devDefaults.devUserId,
 		TMPDIR: baseEnv.TMPDIR ?? "/tmp",
 	}
 }
@@ -199,7 +199,7 @@ export function podmanPostgresRunArgs(options) {
 }
 
 export function helpText() {
-	return `sandhost local development stack
+	return `sando local development stack
 
 Usage:
   pnpm dev

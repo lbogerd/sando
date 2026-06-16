@@ -2,7 +2,7 @@ import { serve, type ServerType } from "@hono/node-server"
 import { Hono } from "hono"
 import { pathToFileURL } from "node:url"
 
-import { authBasePath, type SandhostAuth } from "@sando/auth"
+import { authBasePath, type SandoAuth } from "@sando/auth"
 import {
 	runProjectCommandInputMetadata,
 	sandboxCapabilities,
@@ -29,11 +29,11 @@ import {
 } from "./projects.js"
 import { createMemoryRunRepository, createRunRoutes, type RunRepository } from "./runs.js"
 
-export const apiServiceName = "sandhost-api"
+export const apiServiceName = "sando-api"
 export const apiVersion = "v1"
 
 export type HostedAppOptions = {
-	readonly auth?: Pick<SandhostAuth, "handler">
+	readonly auth?: Pick<SandoAuth, "handler">
 	readonly now?: () => Date
 	readonly auditEventRepository?: AuditEventRepository
 	readonly artifactRepository?: ArtifactRepository
@@ -96,7 +96,7 @@ export function createHostedApp(options: HostedAppOptions = {}): Hono {
 
 	v1.get("/status", (context) =>
 		context.json({
-			service: "sandhost-control-plane",
+			service: "sando-control-plane",
 			version: apiVersion,
 			status: "ok",
 			metadata: {

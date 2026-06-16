@@ -4,15 +4,13 @@
 	"private": true,
 	"type": "module",
 	"scripts": {
-		"dev": "node scripts/sandhost-dev.mjs",
+		"dev": "node scripts/sando-dev.mjs",
 		"dev:api": "tsx apps/api/src/index.ts",
 		"format": "oxfmt --write .",
 		"format:check": "oxfmt --check .",
 		"lint": "oxlint .",
-		"approval:manual": "TMPDIR=/tmp tsx scripts/sandhost-approval-flow.mjs",
-		"codex:mcp-smoke": "node scripts/sandhost-codex-mcp-smoke.mjs",
-		"local:doctor": "node scripts/sandhost-local.mjs doctor",
-		"local:smoke": "node scripts/sandhost-local.mjs smoke-node-ts",
+		"local:doctor": "node scripts/sando-local.mjs doctor",
+		"local:smoke": "node scripts/sando-local.mjs smoke-node-ts",
 		"test": "vitest run --passWithNoTests",
 		"typecheck": "pnpm -r --if-present typecheck",
 		"check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test"

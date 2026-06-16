@@ -9,15 +9,15 @@ export type CurrentUserResolver = (
 ) => CurrentUser | null | Promise<CurrentUser | null>
 
 export type DevCurrentUserEnvironment = {
-	readonly SANDHOST_DEV_AUTH_TOKEN?: string
-	readonly SANDHOST_DEV_USER_ID?: string
+	readonly SANDO_DEV_AUTH_TOKEN?: string
+	readonly SANDO_DEV_USER_ID?: string
 }
 
 export function currentUserResolverFromEnv(
 	env: DevCurrentUserEnvironment = process.env,
 ): CurrentUserResolver {
-	const token = env.SANDHOST_DEV_AUTH_TOKEN
-	const userId = env.SANDHOST_DEV_USER_ID
+	const token = env.SANDO_DEV_AUTH_TOKEN
+	const userId = env.SANDO_DEV_USER_ID
 
 	if (
 		token === undefined ||

@@ -5,9 +5,9 @@ import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
-const image = "localhost/sandhost-node-ts:local"
+const image = "localhost/sando-node-ts:local"
 const fixtureRoot = join(repoRoot, "packages", "runners", "fixtures", "node-ts-basic")
-const localRunsRoot = join(repoRoot, ".sandhost", "local-tests")
+const localRunsRoot = join(repoRoot, ".sando", "local-tests")
 
 const [command = "help", ...args] = process.argv.slice(2)
 
@@ -33,12 +33,12 @@ switch (command) {
 }
 
 function help() {
-	console.log(`sandhost local test helper
+	console.log(`sando local test helper
 
 Usage:
-  node scripts/sandhost-local.mjs doctor
-  node scripts/sandhost-local.mjs build-node-ts
-  node scripts/sandhost-local.mjs smoke-node-ts [--skip-build] [--command="pnpm test"]
+  node scripts/sando-local.mjs doctor
+  node scripts/sando-local.mjs build-node-ts
+  node scripts/sando-local.mjs smoke-node-ts [--skip-build] [--command="pnpm test"]
 
 pnpm aliases:
   pnpm local:doctor
@@ -109,7 +109,7 @@ function smokeNodeTs(args) {
 	mkdirSync(localRunsRoot, { recursive: true })
 
 	const runId = `local-${new Date().toISOString().replaceAll(/[:.]/g, "-")}`
-	const containerName = `sandhost-${runId}`
+	const containerName = `sando-${runId}`
 	const artifactRoot = join(localRunsRoot, runId)
 
 	rmSync(artifactRoot, { recursive: true, force: true })
@@ -132,9 +132,9 @@ function smokeNodeTs(args) {
 			"--workdir",
 			"/workspace",
 			"--env",
-			"SANDHOST_ARTIFACTS=/artifacts",
+			"SANDO_ARTIFACTS=/artifacts",
 			"--env",
-			"SANDHOST_WORKSPACE=/workspace",
+			"SANDO_WORKSPACE=/workspace",
 			image,
 			"sleep",
 			"infinity",
@@ -144,7 +144,7 @@ function smokeNodeTs(args) {
 
 		commandResult = run(
 			"podman",
-			["exec", containerName, "/sandhost/runner/run.sh", "bash", "-lc", options.command],
+			["exec", containerName, "/sando/runner/run.sh", "bash", "-lc", options.command],
 			{ allowFailure: true },
 		)
 

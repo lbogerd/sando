@@ -1,45 +1,48 @@
 # Architecture
 
-Sando is a pnpm monorepo for the sandhost MVP. The system lets Codex request a
-policy-bound project command run through a local sandbox runner instead of
-executing directly in the user's working tree.
+Sando is a pnpm monorepo for the Sando MVP demo. The system lets Codex request
+a policy-bound project command through MCP, requires scoped user approval, runs
+the command through a local sandbox runner, and returns refs for logs, diffs,
+artifacts, and audit.
 
-The full product design is in [high-level-design.md](./high-level-design.md).
-This document is the shorter engineering map for the current codebase.
+The target design with implementation status lives in
+[high-level-design.md](./high-level-design.md). This document is the shorter
+engineering map for the current codebase.
 
 ## Runtime Shape
 
-The MVP has three main execution zones:
+The MVP demo has three execution zones:
 
-1. Codex calls the local MCP server.
-2. The local runner packages the project, asks the hosted control plane for
-   authority, runs Podman, captures logs/artifacts/diffs, and uploads private
-   artifact payloads.
-3. The hosted control plane owns users, projects, hosts, agents, grants, run
-   metadata, artifact metadata, and audit events.
+1. Codex calls the local Sando MCP server.
+2. The local runner packages the project, obtains hosted authorization, runs
+   Podman, and captures local logs, artifacts, and diffs.
+3. The hosted control plane owns login, project/host/agent identity, grants,
+   run metadata, artifact metadata, and audit events.
 
 The local runner never writes sandbox changes back to the local repository
-automatically. Results are returned as refs, artifacts, and patches for explicit
+automatically. Results are returned as refs and patches for explicit
 inspection.
 
 ## Packages
 
-- `apps/cli`: future `sandhost` command-line entrypoint for init, login,
-  doctor, local MCP startup, and direct run fallback.
-- `apps/mcp`: future Codex-facing MCP server exposing
-  `sandhost_run_project_command` and supporting read tools.
-- `apps/api`: future hosted control-plane API.
-- `apps/web`: future hosted approval and metadata UI.
+- `apps/cli`: `sando` command-line entrypoint for init, diagnostics, policy
+  inspection, and local MCP startup. Direct run and manual auth commands are
+  intentionally removed.
+- `apps/mcp`: Codex-facing MCP server exposing `sando_run_project_command` and
+  supporting read tools.
+- `apps/api`: hosted control-plane API. It currently uses in-memory repositories
+  by default and exposes the route shapes needed for the MVP demo.
 - `packages/shared`: cross-boundary contracts. It owns branded IDs,
-  `Result`/error helpers, policy schema helpers, and run-command schemas.
-- `packages/runtimes`: sandbox runtime adapter contract. Podman is the MVP
-  implementation target, with Docker and Kubernetes left as future adapter
-  kinds.
-- `packages/runners`: future orchestration layer for policy loading, grant
-  checks, workspace archiving, runtime calls, artifact upload, and reporting.
-- `packages/templates`: future runtime templates, starting with `node-ts`.
-- `packages/auth`: future Better Auth / Agent Auth integration.
-- `packages/db`: future hosted metadata persistence.
+  `Result`/error helpers, policy schema helpers, Agent Auth/grant shapes, run
+  metadata, artifact metadata, audit metadata, and run-command schemas.
+- `packages/runtimes`: sandbox runtime adapter contract and Podman
+  implementation path.
+- `packages/runners`: orchestration layer for policy loading, workspace
+  archiving, runtime calls, local artifact capture, and reporting.
+- `packages/templates`: runtime templates, currently `node-ts`.
+- `packages/auth`: Better Auth scaffolding and future Agent Auth integration.
+- `packages/db`: target hosted metadata schema. DB-backed repositories are
+  deferred for the MVP demo.
 
 ## Shared Contracts
 
@@ -54,13 +57,15 @@ Current shared contracts include:
   artifact, and audit event IDs;
 - `Result<Value, ErrorValue>`, `ok`, and `err`;
 - `SandoError` with stable error codes and JSON-safe details;
-- MVP project policy Zod schema, generated type, metadata, defaults, parser,
-  and type guard;
-- `RunProjectCommandInput` and `RunProjectCommandResult` Zod schemas,
-  generated types, parser helpers, and type guards.
+- Sando policy schema, generated type, metadata, defaults, parser, and type
+  guard;
+- Agent capability, grant, registration, run metadata, artifact metadata, and
+  audit metadata schemas;
+- `RunProjectCommandInput` and `RunProjectCommandResult` schemas, generated
+  types, parser helpers, and type guards.
 
-Prefer extending these contracts before inventing local equivalents in an app or
-package.
+Prefer extending these contracts before inventing local equivalents in an app
+or package.
 
 ## Runtime Boundary
 
@@ -82,7 +87,7 @@ Policy is enforced by combining system limits, hosted project policy, local
 project policy, template defaults, grant constraints, and requested command
 options. The most restrictive effective value should win.
 
-The MVP policy supports only:
+The MVP demo policy supports:
 
 - runtime: `podman`;
 - network: `none` or `default`;
@@ -93,16 +98,16 @@ The MVP policy supports only:
 
 ## Result Boundary
 
-The high-level MCP flow should prefer one tool:
+The high-level MCP flow should prefer one command-execution tool:
 
 ```ts
-sandhost_run_project_command({
+sando_run_project_command({
 	command: "pnpm test",
 	network: "none",
 	timeoutSeconds: 600,
 })
 ```
 
-The result returns stable refs such as `sandhost://runs/run_123/logs`,
-`sandhost://runs/run_123/diff`, and `sandhost://artifacts/art_123`. Consumers
-should call read/download tools for payloads instead of assuming local paths.
+The result returns stable refs such as `sando://runs/run_123/logs`,
+`sando://runs/run_123/diff`, and `sando://artifacts/art_123`. Consumers should
+call read/download tools for payloads instead of assuming local paths.
