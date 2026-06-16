@@ -1,5 +1,4 @@
-# Current cleanup batch
-
+[x] Cleanup batch | finished
 - [x] Anchor the project on the honest MVP demo shape.
 - [x] Treat `docs/high-level-design.md` as target design with status labels.
 - [x] Prefer hard cuts over compatibility aliases while the project is early.
@@ -12,9 +11,7 @@
 - [x] Remove Playwright/browser artifact defaults from the MVP policy.
 - [x] Keep `pnpm local:doctor` and `pnpm local:smoke` as dev verification.
 - [x] Run repo checks after cleanup.
-
-# Next implementation batch
-
+[ ] Implementation batch
 - [ ] Add interactive hosted login to `sando init --codex`.
 - [ ] Register project identity during init.
 - [ ] Register local host identity during init.
@@ -27,9 +24,7 @@
 - [ ] Finish hosted run metadata after local execution.
 - [ ] Append hosted audit events for grant and run lifecycle.
 - [ ] Return a hosted audit ref in the MCP command result.
-
-# Later
-
+[ ] Later
 - [ ] Wire DB-backed repositories for hosted metadata.
 - [ ] Add private hosted artifact payload storage.
 - [ ] Revisit browser/Playwright runtime support.
