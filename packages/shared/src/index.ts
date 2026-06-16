@@ -279,7 +279,17 @@ export const defaultSandoPolicy = {
 		allow: [],
 	},
 	artifacts: ["coverage/**", "test-results/**", "*.patch"],
-	exclude: [".git", "node_modules", ".env", ".env.*", "dist", "build", "coverage", ".sando/runs"],
+	exclude: [
+		".git",
+		"node_modules",
+		".env",
+		".env.*",
+		"dist",
+		"build",
+		"coverage",
+		".sando/runs",
+		".sando/session.json",
+	],
 } as const satisfies SandoPolicy
 
 export const sandoPolicyMetadata = {
@@ -784,6 +794,75 @@ export function parseHostRegistrationResult(value: unknown): Result<HostRegistra
 
 export function isHostRegistrationResult(value: unknown): value is HostRegistrationResult {
 	return parseHostRegistrationResult(value).ok
+}
+
+export const agentRecordSchema = z.object({
+	id: idSchema("agent", "Expected an agent ID."),
+	userId: idSchema("user", "Expected a user ID."),
+	hostId: idSchema("host", "Expected a host ID."),
+	kind: agentKindSchema,
+	displayName: nonEmptyStringSchema,
+	createdAt: nonEmptyStringSchema,
+	lastSeenAt: nonEmptyStringSchema,
+})
+
+export type AgentRecord = z.infer<typeof agentRecordSchema>
+
+export const registerAgentInputSchema = z.object({
+	hostId: idSchema("host", "Expected a host ID."),
+	kind: agentKindSchema,
+	displayName: nonEmptyStringSchema,
+})
+
+export type RegisterAgentInput = z.infer<typeof registerAgentInputSchema>
+
+export const agentRegistrationResultSchema = z.object({
+	agent: agentRecordSchema,
+	created: z.boolean(),
+})
+
+export type AgentRegistrationResult = z.infer<typeof agentRegistrationResultSchema>
+
+export function parseAgentRecord(value: unknown): Result<AgentRecord> {
+	const result = agentRecordSchema.safeParse(value)
+
+	if (!result.success) {
+		return err(validationError("Invalid agent record.", result.error))
+	}
+
+	return ok(result.data)
+}
+
+export function isAgentRecord(value: unknown): value is AgentRecord {
+	return parseAgentRecord(value).ok
+}
+
+export function parseRegisterAgentInput(value: unknown): Result<RegisterAgentInput> {
+	const result = registerAgentInputSchema.safeParse(value)
+
+	if (!result.success) {
+		return err(validationError("Invalid register agent input.", result.error))
+	}
+
+	return ok(result.data)
+}
+
+export function isRegisterAgentInput(value: unknown): value is RegisterAgentInput {
+	return parseRegisterAgentInput(value).ok
+}
+
+export function parseAgentRegistrationResult(value: unknown): Result<AgentRegistrationResult> {
+	const result = agentRegistrationResultSchema.safeParse(value)
+
+	if (!result.success) {
+		return err(validationError("Invalid agent registration result.", result.error))
+	}
+
+	return ok(result.data)
+}
+
+export function isAgentRegistrationResult(value: unknown): value is AgentRegistrationResult {
+	return parseAgentRegistrationResult(value).ok
 }
 
 export const runRecordSchema = z.object({

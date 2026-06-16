@@ -4,14 +4,12 @@ import {
 	authAppName,
 	authBasePath,
 	createSandoAuthOptions,
-	defaultMaximumPasswordLength,
-	defaultMinimumPasswordLength,
 	sandoAuthOptionsFromEnv,
 	type AuthDatabase,
 } from "./index.js"
 
 describe("sando auth configuration", () => {
-	it("enables Better Auth email and password login", () => {
+	it("enables Better Auth anonymous sessions with bearer auth", () => {
 		const database = {} as AuthDatabase
 
 		const options = createSandoAuthOptions({
@@ -28,14 +26,11 @@ describe("sando auth configuration", () => {
 			secret: "test-secret",
 			baseURL: "https://sando.example",
 			trustedOrigins: ["https://app.sando.example"],
-			emailAndPassword: {
-				enabled: true,
-				minPasswordLength: defaultMinimumPasswordLength,
-				maxPasswordLength: defaultMaximumPasswordLength,
-				requireEmailVerification: false,
-				autoSignIn: true,
-			},
 		})
+		const plugins = options.plugins ?? []
+
+		expect(plugins.map((plugin) => plugin.id)).toEqual(["anonymous", "bearer"])
+		expect(options).not.toHaveProperty("emailAndPassword")
 	})
 
 	it("reads hosted auth options from environment values", () => {

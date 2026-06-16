@@ -43,11 +43,22 @@ export type GetGrantCommand = {
 	readonly userId: UserId
 }
 
+export type GetApprovalGrantCommand = {
+	readonly grantId: GrantId
+	readonly now: Date
+}
+
 export type DecideGrantCommand = {
 	readonly grantId: GrantId
 	readonly now: Date
 	readonly scope?: GrantScope
 	readonly userId: UserId
+}
+
+export type DecideApprovalGrantCommand = {
+	readonly grantId: GrantId
+	readonly now: Date
+	readonly scope?: GrantScope
 }
 
 export type AuthorizeGrantCommand = AuthorizeGrantInput & {
@@ -60,11 +71,20 @@ export type GrantRepository = {
 		input: RequestGrantCommand,
 	) => RequestGrantRepositoryResult | Promise<RequestGrantRepositoryResult>
 	readonly getGrant: (input: GetGrantCommand) => GrantRecord | null | Promise<GrantRecord | null>
+	readonly getApprovalGrant: (
+		input: GetApprovalGrantCommand,
+	) => GrantRecord | null | Promise<GrantRecord | null>
 	readonly approveGrant: (
 		input: DecideGrantCommand & { readonly scope: GrantScope },
 	) => GrantRecord | null | Promise<GrantRecord | null>
+	readonly approveApprovalGrant: (
+		input: DecideApprovalGrantCommand & { readonly scope: GrantScope },
+	) => GrantRecord | null | Promise<GrantRecord | null>
 	readonly denyGrant: (
 		input: DecideGrantCommand,
+	) => GrantRecord | null | Promise<GrantRecord | null>
+	readonly denyApprovalGrant: (
+		input: DecideApprovalGrantCommand,
 	) => GrantRecord | null | Promise<GrantRecord | null>
 	readonly authorizeGrant: (
 		input: AuthorizeGrantCommand,
@@ -123,65 +143,27 @@ export function createMemoryGrantRepository(
 		},
 
 		getGrant(input) {
-			const grant = byId.get(input.grantId)
+			return getGrantById(byId, input)
+		},
 
-			if (grant === undefined || grant.userId !== input.userId) {
-				return null
-			}
-
-			return expireGrantIfNeeded(byId, grant, input.now)
+		getApprovalGrant(input) {
+			return getGrantById(byId, input)
 		},
 
 		approveGrant(input) {
-			const grant = byId.get(input.grantId)
+			return approveGrantById(byId, input)
+		},
 
-			if (grant === undefined || grant.userId !== input.userId) {
-				return null
-			}
-
-			const current = expireGrantIfNeeded(byId, grant, input.now)
-
-			if (current.status !== "pending") {
-				return current
-			}
-
-			const approved: GrantRecord = {
-				...current,
-				scope: input.scope,
-				status: "approved",
-				approvedAt: input.now.toISOString(),
-				expiresAt: expiresAt(
-					input.now,
-					input.scope === "project_window" ? projectWindowGrantTtlSeconds : oneShotGrantTtlSeconds,
-				),
-			}
-
-			byId.set(approved.id, approved)
-
-			return approved
+		approveApprovalGrant(input) {
+			return approveGrantById(byId, input)
 		},
 
 		denyGrant(input) {
-			const grant = byId.get(input.grantId)
+			return denyGrantById(byId, input)
+		},
 
-			if (grant === undefined || grant.userId !== input.userId) {
-				return null
-			}
-
-			const current = expireGrantIfNeeded(byId, grant, input.now)
-
-			if (current.status !== "pending") {
-				return current
-			}
-
-			const denied: GrantRecord = {
-				...current,
-				status: "denied",
-			}
-
-			byId.set(denied.id, denied)
-
-			return denied
+		denyApprovalGrant(input) {
+			return denyGrantById(byId, input)
 		},
 
 		authorizeGrant(input) {
@@ -222,6 +204,75 @@ export function createMemoryGrantRepository(
 			}
 		},
 	}
+}
+
+type GrantLookupCommand = {
+	readonly grantId: GrantId
+	readonly now: Date
+	readonly userId?: UserId
+}
+
+type ApproveGrantLookupCommand = GrantLookupCommand & {
+	readonly scope: GrantScope
+}
+
+function getGrantById(
+	grants: Map<GrantId, GrantRecord>,
+	input: GrantLookupCommand,
+): GrantRecord | null {
+	const grant = grants.get(input.grantId)
+
+	if (grant === undefined || (input.userId !== undefined && grant.userId !== input.userId)) {
+		return null
+	}
+
+	return expireGrantIfNeeded(grants, grant, input.now)
+}
+
+function approveGrantById(
+	grants: Map<GrantId, GrantRecord>,
+	input: ApproveGrantLookupCommand,
+): GrantRecord | null {
+	const current = getGrantById(grants, input)
+
+	if (current === null || current.status !== "pending") {
+		return current
+	}
+
+	const approved: GrantRecord = {
+		...current,
+		scope: input.scope,
+		status: "approved",
+		approvedAt: input.now.toISOString(),
+		expiresAt: expiresAt(
+			input.now,
+			input.scope === "project_window" ? projectWindowGrantTtlSeconds : oneShotGrantTtlSeconds,
+		),
+	}
+
+	grants.set(approved.id, approved)
+
+	return approved
+}
+
+function denyGrantById(
+	grants: Map<GrantId, GrantRecord>,
+	input: GrantLookupCommand,
+): GrantRecord | null {
+	const current = getGrantById(grants, input)
+
+	if (current === null || current.status !== "pending") {
+		return current
+	}
+
+	const denied: GrantRecord = {
+		...current,
+		status: "denied",
+	}
+
+	grants.set(denied.id, denied)
+
+	return denied
 }
 
 export function createGrantRoutes(options: GrantRoutesOptions): Hono {
@@ -345,21 +396,14 @@ export function createGrantRoutes(options: GrantRoutesOptions): Hono {
 	})
 
 	routes.get("/grants/:grantId/approval", async (context) => {
-		const currentUser = await options.currentUser(context.req.raw)
-
-		if (currentUser === null) {
-			return context.html(approvalMessagePage("Authentication required."), 401)
-		}
-
 		const grantId = parseGrantIdParam(context.req.param("grantId"))
 
 		if (!grantId.ok) {
 			return context.html(approvalMessagePage("Invalid grant ID."), 400)
 		}
 
-		const grant = await options.grantRepository.getGrant({
+		const grant = await options.grantRepository.getApprovalGrant({
 			grantId: grantId.value,
-			userId: currentUser.userId,
 			now: options.now(),
 		})
 
@@ -371,12 +415,6 @@ export function createGrantRoutes(options: GrantRoutesOptions): Hono {
 	})
 
 	routes.post("/grants/:grantId/approve", async (context) => {
-		const currentUser = await options.currentUser(context.req.raw)
-
-		if (currentUser === null) {
-			return context.json({ error: unauthorizedError() }, 401)
-		}
-
 		const grantId = parseGrantIdParam(context.req.param("grantId"))
 
 		if (!grantId.ok) {
@@ -389,10 +427,9 @@ export function createGrantRoutes(options: GrantRoutesOptions): Hono {
 			return context.json({ error: input.error }, 400)
 		}
 
-		const grant = await options.grantRepository.approveGrant({
+		const grant = await options.grantRepository.approveApprovalGrant({
 			grantId: grantId.value,
 			scope: input.value.scope,
-			userId: currentUser.userId,
 			now: options.now(),
 		})
 
@@ -411,7 +448,7 @@ export function createGrantRoutes(options: GrantRoutesOptions): Hono {
 					...grantAuditMetadata(grant, grant.capabilities[0] ?? "sandbox.run_project_command"),
 					scope: grant.scope,
 				},
-				userId: currentUser.userId,
+				userId: grant.userId,
 				now: options.now(),
 			})
 		}
@@ -422,21 +459,14 @@ export function createGrantRoutes(options: GrantRoutesOptions): Hono {
 	})
 
 	routes.post("/grants/:grantId/deny", async (context) => {
-		const currentUser = await options.currentUser(context.req.raw)
-
-		if (currentUser === null) {
-			return context.json({ error: unauthorizedError() }, 401)
-		}
-
 		const grantId = parseGrantIdParam(context.req.param("grantId"))
 
 		if (!grantId.ok) {
 			return context.json({ error: grantId.error }, 400)
 		}
 
-		const grant = await options.grantRepository.denyGrant({
+		const grant = await options.grantRepository.denyApprovalGrant({
 			grantId: grantId.value,
-			userId: currentUser.userId,
 			now: options.now(),
 		})
 
@@ -452,7 +482,7 @@ export function createGrantRoutes(options: GrantRoutesOptions): Hono {
 				agentId: grant.agentId,
 				grantId: grant.id,
 				metadata: grantAuditMetadata(grant, grant.capabilities[0] ?? "sandbox.run_project_command"),
-				userId: currentUser.userId,
+				userId: grant.userId,
 				now: options.now(),
 			})
 		}

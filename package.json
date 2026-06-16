@@ -17,6 +17,7 @@
 	},
 	"devDependencies": {
 		"@types/node": "latest",
+		"drizzle-kit": "^0.31.10",
 		"oxfmt": "latest",
 		"oxlint": "latest",
 		"tsx": "^4.22.4",

@@ -120,6 +120,7 @@ export const user = sandoSchema.table("user", {
 	name: text("name").notNull(),
 	email: text("email").notNull().unique(),
 	emailVerified: boolean("email_verified").notNull().default(false),
+	isAnonymous: boolean("is_anonymous").notNull().default(false),
 	image: text("image"),
 	createdAt: authCreatedAtColumn(),
 	updatedAt: authUpdatedAtColumn(),

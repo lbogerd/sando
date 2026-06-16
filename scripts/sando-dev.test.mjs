@@ -3,7 +3,10 @@ import { describe, expect, it } from "vitest"
 import {
 	apiEnv,
 	databaseUrl,
+	databasePrepareArgs,
+	databaseVerifyArgs,
 	devDefaults,
+	drizzleKitMigrateArgs,
 	helpText,
 	parseDevArgs,
 	podmanPostgresRunArgs,
@@ -105,6 +108,18 @@ describe("sando dev script", () => {
 			"sando-postgres-data:/var/lib/postgresql/data",
 			"docker.io/library/postgres:16-alpine",
 		])
+	})
+
+	it("builds the Drizzle migrate command", () => {
+		expect(drizzleKitMigrateArgs()).toEqual(["migrate", "--config", "drizzle.config.ts"])
+	})
+
+	it("builds the database prepare command", () => {
+		expect(databasePrepareArgs()).toEqual(["scripts/sando-prepare-database.ts"])
+	})
+
+	it("builds the database verify command", () => {
+		expect(databaseVerifyArgs()).toEqual(["scripts/sando-verify-database.ts"])
 	})
 
 	it("prints root pnpm dev usage", () => {

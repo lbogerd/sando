@@ -166,8 +166,12 @@ export function databaseUrl(options) {
 }
 
 export function apiEnv(baseEnv, options) {
+	const apiUrl = `http://${options.apiHost}:${options.apiPort}`
+
 	return {
 		...baseEnv,
+		BETTER_AUTH_SECRET: baseEnv.BETTER_AUTH_SECRET ?? "sando-dev-better-auth-secret",
+		BETTER_AUTH_URL: baseEnv.BETTER_AUTH_URL ?? apiUrl,
 		DATABASE_URL: baseEnv.DATABASE_URL ?? databaseUrl(options),
 		HOST: baseEnv.HOST ?? options.apiHost,
 		PORT: baseEnv.PORT ?? String(options.apiPort),
@@ -266,6 +270,7 @@ async function main() {
 			return
 		}
 
+		prepareDatabase(options)
 		const api = startApi(options)
 
 		for (const signal of ["SIGINT", "SIGTERM"]) {
@@ -341,6 +346,44 @@ function startApi(options) {
 	})
 }
 
+export function drizzleKitMigrateArgs() {
+	return ["migrate", "--config", "drizzle.config.ts"]
+}
+
+export function databasePrepareArgs() {
+	return ["scripts/sando-prepare-database.ts"]
+}
+
+export function databaseVerifyArgs() {
+	return ["scripts/sando-verify-database.ts"]
+}
+
+function prepareDatabase(options) {
+	const env = apiEnv(process.env, options)
+
+	console.log("Preparing database schema")
+	run(tsxExecutable(), databasePrepareArgs(), {
+		env,
+	})
+
+	console.log("Applying database migrations with drizzle-kit migrate")
+	run(drizzleKitExecutable(), drizzleKitMigrateArgs(), {
+		env,
+	})
+
+	console.log("Verifying database schema")
+	run(tsxExecutable(), databaseVerifyArgs(), {
+		env,
+	})
+}
+
+function drizzleKitExecutable() {
+	const executable = process.platform === "win32" ? "drizzle-kit.cmd" : "drizzle-kit"
+	const local = resolve(repoRoot, "node_modules", ".bin", executable)
+
+	return existsSync(local) ? local : executable
+}
+
 function tsxExecutable() {
 	const executable = process.platform === "win32" ? "tsx.cmd" : "tsx"
 	const local = resolve(repoRoot, "node_modules", ".bin", executable)
@@ -359,6 +402,7 @@ function run(command, args, options = {}) {
 	const result = spawnSync(command, args, {
 		cwd: repoRoot,
 		encoding: "utf8",
+		env: options.env ?? process.env,
 		stdio: options.quiet ? "pipe" : "inherit",
 	})
 

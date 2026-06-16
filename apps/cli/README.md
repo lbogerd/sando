@@ -53,7 +53,7 @@ Created or updated files:
 The command also runs:
 
 ```bash
-codex mcp add sando -- npx -y @sando/cli mcp
+codex mcp add sando -- sando mcp --project-root <project-root>
 ```
 
 Interactive hosted login and project/host/agent registration are Todo.

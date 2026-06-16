@@ -1,4 +1,5 @@
 import { asId, isIdOfKind, type UserId } from "@sando/shared"
+import type { SandoAuth } from "@sando/auth"
 
 export type CurrentUser = {
 	readonly userId: UserId
@@ -42,4 +43,26 @@ export function createBearerTokenCurrentUserResolver(input: {
 
 	return (request) =>
 		request.headers.get("authorization") === expectedHeader ? { userId: input.userId } : null
+}
+
+export function createBetterAuthCurrentUserResolver(
+	auth: Pick<SandoAuth, "api">,
+): CurrentUserResolver {
+	return async (request) => {
+		const session = await auth.api
+			.getSession({
+				headers: request.headers,
+			})
+			.catch(() => null)
+
+		const userId = session?.user.id
+
+		if (typeof userId !== "string" || userId.trim().length === 0) {
+			return null
+		}
+
+		return {
+			userId: asId("user", userId.startsWith("user_") ? userId : `user_${userId}`),
+		}
+	}
 }

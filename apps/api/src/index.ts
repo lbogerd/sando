@@ -2,13 +2,20 @@ import { serve, type ServerType } from "@hono/node-server"
 import { Hono } from "hono"
 import { pathToFileURL } from "node:url"
 
-import { authBasePath, type SandoAuth } from "@sando/auth"
+import {
+	authBasePath,
+	createSandoDrizzleAuth,
+	sandoAuthOptionsFromEnv,
+	type SandoAuth,
+} from "@sando/auth"
+import { createPostgresJsDatabase } from "@sando/db"
 import {
 	runProjectCommandInputMetadata,
 	sandboxCapabilities,
 	sandoPolicyMetadata,
 } from "@sando/shared"
 
+import { createAgentRoutes, createMemoryAgentRepository, type AgentRepository } from "./agents.js"
 import {
 	createAuditEventRoutes,
 	createMemoryAuditEventRepository,
@@ -19,7 +26,11 @@ import {
 	createMemoryArtifactRepository,
 	type ArtifactRepository,
 } from "./artifacts.js"
-import { currentUserResolverFromEnv, type CurrentUserResolver } from "./current-user.js"
+import {
+	createBetterAuthCurrentUserResolver,
+	currentUserResolverFromEnv,
+	type CurrentUserResolver,
+} from "./current-user.js"
 import { createGrantRoutes, createMemoryGrantRepository, type GrantRepository } from "./grants.js"
 import { createHostRoutes, createMemoryHostRepository, type HostRepository } from "./hosts.js"
 import {
@@ -33,7 +44,8 @@ export const apiServiceName = "sando-api"
 export const apiVersion = "v1"
 
 export type HostedAppOptions = {
-	readonly auth?: Pick<SandoAuth, "handler">
+	readonly auth?: Pick<SandoAuth, "handler"> & Partial<Pick<SandoAuth, "api">>
+	readonly agentRepository?: AgentRepository
 	readonly now?: () => Date
 	readonly auditEventRepository?: AuditEventRepository
 	readonly artifactRepository?: ArtifactRepository
@@ -51,9 +63,14 @@ export type HostedServerOptions = HostedAppOptions & {
 
 export function createHostedApp(options: HostedAppOptions = {}): Hono {
 	const now = options.now ?? (() => new Date())
+	const agentRepository = options.agentRepository ?? createMemoryAgentRepository()
 	const auditEventRepository = options.auditEventRepository ?? createMemoryAuditEventRepository()
 	const artifactRepository = options.artifactRepository ?? createMemoryArtifactRepository()
-	const currentUser = options.currentUser ?? currentUserResolverFromEnv()
+	const currentUser =
+		options.currentUser ??
+		(options.auth?.api === undefined
+			? currentUserResolverFromEnv()
+			: createBetterAuthCurrentUserResolver({ api: options.auth.api }))
 	const grantRepository = options.grantRepository ?? createMemoryGrantRepository()
 	const hostRepository = options.hostRepository ?? createMemoryHostRepository()
 	const projectRepository = options.projectRepository ?? createMemoryProjectRepository()
@@ -114,6 +131,7 @@ export function createHostedApp(options: HostedAppOptions = {}): Hono {
 	v1.route(
 		"/",
 		createProjectRoutes({
+			auditEventRepository,
 			currentUser,
 			now,
 			projectRepository,
@@ -122,6 +140,7 @@ export function createHostedApp(options: HostedAppOptions = {}): Hono {
 	v1.route(
 		"/",
 		createHostRoutes({
+			auditEventRepository,
 			currentUser,
 			hostRepository,
 			now,
@@ -129,7 +148,17 @@ export function createHostedApp(options: HostedAppOptions = {}): Hono {
 	)
 	v1.route(
 		"/",
+		createAgentRoutes({
+			agentRepository,
+			auditEventRepository,
+			currentUser,
+			now,
+		}),
+	)
+	v1.route(
+		"/",
 		createRunRoutes({
+			auditEventRepository,
 			currentUser,
 			now,
 			runRepository,
@@ -196,8 +225,10 @@ export const app = createHostedApp()
 export function serveHostedApp(options: HostedServerOptions = {}): ServerType {
 	const port = options.port ?? Number.parseInt(process.env.PORT ?? "3000", 10)
 	const hostname = options.hostname ?? process.env.HOST ?? "0.0.0.0"
+	const auth = options.auth ?? authFromEnv()
 	const hostedApp = createHostedApp({
-		...(options.auth === undefined ? {} : { auth: options.auth }),
+		...(auth === undefined ? {} : { auth }),
+		...(options.agentRepository === undefined ? {} : { agentRepository: options.agentRepository }),
 		...(options.now === undefined ? {} : { now: options.now }),
 		...(options.auditEventRepository === undefined
 			? {}
@@ -224,6 +255,19 @@ export function serveHostedApp(options: HostedServerOptions = {}): ServerType {
 			console.log(`${apiServiceName} listening on http://${info.address}:${info.port}`)
 		},
 	)
+}
+
+function authFromEnv(): SandoAuth | undefined {
+	if (process.env.DATABASE_URL === undefined) {
+		return undefined
+	}
+
+	return createSandoDrizzleAuth({
+		db: createPostgresJsDatabase({
+			databaseUrl: process.env.DATABASE_URL,
+		}),
+		...sandoAuthOptionsFromEnv(process.env),
+	})
 }
 
 function isMainModule(): boolean {

@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process"
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { basename, dirname, join, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
 
-import { startStdioServer } from "@sando/mcp"
+import { createSandoMcpService, startStdioServer } from "@sando/mcp"
 import {
 	defaultSandoPolicy,
 	runProjectCommandInputMetadata,
@@ -16,8 +16,9 @@ export const appName = "sando"
 export const cliVersion = "0.0.0"
 export const defaultProjectFile = ".sando/project.json"
 export const defaultPolicyFile = ".sando/policy.json"
+export const defaultSessionFile = ".sando/session.json"
 export const codexMcpServerName = "sando"
-export const defaultCodexMcpCommand = ["npx", "-y", "@sando/cli", "mcp"] as const
+export const defaultCodexMcpCommand = ["sando", "mcp"] as const
 
 export type CliResult = {
 	readonly exitCode: number
@@ -47,6 +48,7 @@ export type InitializeSandoProjectOptions = {
 	readonly codex?: boolean
 	readonly codexCommand?: string
 	readonly env?: NodeJS.ProcessEnv
+	readonly fetch?: typeof fetch
 	readonly mcpCommand?: readonly string[]
 	readonly now?: Date
 	readonly projectRoot?: string
@@ -59,6 +61,7 @@ export type InitializeSandoProjectResult = {
 	readonly policy: FileInitStatus
 	readonly project: FileInitStatus
 	readonly projectRoot: string
+	readonly session?: FileInitStatus
 }
 
 export type FileInitStatus = {
@@ -83,10 +86,10 @@ export type CodexMcpInitStatus =
 			readonly status: "skipped"
 	  }
 
-export function runCli(
+export async function runCli(
 	argv: readonly string[] = process.argv.slice(2),
 	env: NodeJS.ProcessEnv = process.env,
-): CliResult {
+): Promise<CliResult> {
 	const [command = "help", ...args] = argv
 
 	switch (command) {
@@ -103,7 +106,7 @@ export function runCli(
 		case "doctor":
 			return success(`${JSON.stringify(doctorReport(env), null, 2)}\n`)
 		case "init":
-			return initCommand(args, env)
+			return await initCommand(args, env)
 		case "policy":
 			return policyCommand(args)
 		case "mcp":
@@ -113,7 +116,7 @@ export function runCli(
 	}
 }
 
-function initCommand(args: readonly string[], env: NodeJS.ProcessEnv): CliResult {
+async function initCommand(args: readonly string[], env: NodeJS.ProcessEnv): Promise<CliResult> {
 	if (args.includes("--help") || args.includes("-h")) {
 		return success(initHelpText())
 	}
@@ -125,7 +128,7 @@ function initCommand(args: readonly string[], env: NodeJS.ProcessEnv): CliResult
 	}
 
 	try {
-		const result = initializeSandoProject({
+		const result = await initializeSandoProject({
 			codex: parsed.value.codex,
 			env,
 			...(parsed.value.projectRoot === undefined ? {} : { projectRoot: parsed.value.projectRoot }),
@@ -186,21 +189,43 @@ function parseInitArgs(
 	return { ok: true, value: options }
 }
 
-export function initializeSandoProject(
+export async function initializeSandoProject(
 	options: InitializeSandoProjectOptions = {},
-): InitializeSandoProjectResult {
+): Promise<InitializeSandoProjectResult> {
 	const env = options.env ?? process.env
 	const projectRoot = resolve(options.projectRoot ?? process.cwd())
 	const now = options.now ?? new Date()
 
 	mkdirSync(join(projectRoot, ".sando"), { recursive: true })
 
-	const project = writeJsonFileIfMissing(
+	let project = writeJsonFileIfMissing(
 		join(projectRoot, defaultProjectFile),
 		defaultProjectConfig(projectRoot, now),
 	)
 	const policy = writeJsonFileIfMissing(join(projectRoot, defaultPolicyFile), defaultSandoPolicy)
 	const agents = upsertAgentsFile(join(projectRoot, "AGENTS.md"))
+	const hosted =
+		options.codex === true
+			? await initializeHostedIdentity({
+					env,
+					fetch: options.fetch ?? fetch,
+					now,
+					projectRoot,
+				})
+			: undefined
+
+	if (hosted !== undefined) {
+		project = upsertProjectHostedConfig(join(projectRoot, defaultProjectFile), hosted.projectConfig)
+	}
+
+	const session =
+		hosted === undefined
+			? undefined
+			: writeSessionFile(join(projectRoot, defaultSessionFile), {
+					version: 1,
+					token: hosted.token,
+					createdAt: now.toISOString(),
+				})
 	const codex =
 		options.codex === true
 			? configureCodexMcp({
@@ -220,6 +245,7 @@ export function initializeSandoProject(
 		policy,
 		project,
 		projectRoot,
+		...(session === undefined ? {} : { session }),
 	}
 }
 
@@ -261,6 +287,180 @@ function writeJsonFileIfMissing(path: string, value: unknown): FileInitStatus {
 	writeFileSync(path, `${JSON.stringify(value, null, "\t")}\n`, "utf8")
 
 	return { path, status: "created" }
+}
+
+function writeJsonFile(path: string, value: unknown, mode?: number): FileInitStatus {
+	const existed = existsSync(path)
+
+	mkdirSync(dirname(path), { recursive: true })
+	writeFileSync(path, `${JSON.stringify(value, null, "\t")}\n`, {
+		encoding: "utf8",
+		...(mode === undefined ? {} : { mode }),
+	})
+
+	if (mode !== undefined) {
+		chmodSync(path, mode)
+	}
+
+	return { path, status: existed ? "updated" : "created" }
+}
+
+function readJsonFile(path: string): Record<string, unknown> {
+	return JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>
+}
+
+function upsertProjectHostedConfig(
+	path: string,
+	hostedConfig: Record<string, unknown>,
+): FileInitStatus {
+	const current = existsSync(path) ? readJsonFile(path) : {}
+
+	return writeJsonFile(path, {
+		...current,
+		...hostedConfig,
+		mcp: {
+			...(typeof current.mcp === "object" && current.mcp !== null ? current.mcp : {}),
+			serverName: codexMcpServerName,
+		},
+	})
+}
+
+function writeSessionFile(path: string, value: unknown): FileInitStatus {
+	return writeJsonFile(path, value, 0o600)
+}
+
+async function initializeHostedIdentity(input: {
+	readonly env: NodeJS.ProcessEnv
+	readonly fetch: typeof fetch
+	readonly now: Date
+	readonly projectRoot: string
+}): Promise<{
+	readonly projectConfig: Record<string, unknown>
+	readonly token: string
+}> {
+	const apiUrl = (input.env.SANDO_API_URL ?? "http://127.0.0.1:3000").replace(/\/+$/u, "")
+	const token = await signInAnonymously(apiUrl, input.fetch)
+	const headers = {
+		authorization: `Bearer ${token}`,
+		"content-type": "application/json",
+	}
+	const project = await postHostedJson(
+		input.fetch,
+		`${apiUrl}/v1/projects/register`,
+		{
+			name: discoverProjectName(input.projectRoot),
+			localFingerprint: projectFingerprint(input.projectRoot),
+			policyId: "policy_default",
+		},
+		headers,
+	)
+	const host = await postHostedJson(
+		input.fetch,
+		`${apiUrl}/v1/hosts/register`,
+		{
+			name: input.env.SANDO_HOST_NAME ?? defaultHostName(input.env),
+			platform: "linux-wsl",
+			runtime: "podman",
+			fingerprint: hostFingerprint(input.env),
+		},
+		headers,
+	)
+	const agent = await postHostedJson(
+		input.fetch,
+		`${apiUrl}/v1/agents/register`,
+		{
+			hostId: idFromNested(host, "host"),
+			kind: "codex",
+			displayName: input.env.SANDO_CODEX_AGENT_NAME ?? "Codex",
+		},
+		headers,
+	)
+
+	return {
+		token,
+		projectConfig: {
+			apiUrl,
+			projectId: idFromNested(project, "project"),
+			hostId: idFromNested(host, "host"),
+			agentId: idFromNested(agent, "agent"),
+			initializedAt: input.now.toISOString(),
+		},
+	}
+}
+
+async function signInAnonymously(apiUrl: string, fetchFn: typeof fetch): Promise<string> {
+	const response = await fetchFn(`${apiUrl}/api/auth/sign-in/anonymous`, {
+		method: "POST",
+		headers: {
+			"content-type": "application/json",
+		},
+		body: "{}",
+	})
+	const body = await readHostedResponse(response)
+	const token = body.token
+
+	if (typeof token !== "string" || token.length === 0) {
+		throw new Error("Anonymous sign-in response did not include a session token.")
+	}
+
+	return token
+}
+
+async function postHostedJson(
+	fetchFn: typeof fetch,
+	url: string,
+	body: unknown,
+	headers: Record<string, string>,
+): Promise<Record<string, unknown>> {
+	const response = await fetchFn(url, {
+		method: "POST",
+		headers,
+		body: JSON.stringify(body),
+	})
+
+	return await readHostedResponse(response)
+}
+
+async function readHostedResponse(response: Response): Promise<Record<string, unknown>> {
+	const body = (await response.json().catch(() => undefined)) as unknown
+
+	if (!response.ok) {
+		throw new Error(`Hosted sando request failed with HTTP ${response.status}.`)
+	}
+
+	if (typeof body !== "object" || body === null || Array.isArray(body)) {
+		throw new Error("Hosted sando response did not contain a JSON object.")
+	}
+
+	return body as Record<string, unknown>
+}
+
+function idFromNested(value: Record<string, unknown>, key: string): string {
+	const nested = value[key]
+
+	if (typeof nested !== "object" || nested === null || Array.isArray(nested)) {
+		throw new Error(`Hosted sando response did not include ${key}.`)
+	}
+
+	const id = (nested as Record<string, unknown>).id
+
+	if (typeof id !== "string" || id.length === 0) {
+		throw new Error(`Hosted sando ${key} response did not include an id.`)
+	}
+
+	return id
+}
+
+function projectFingerprint(projectRoot: string): string {
+	return `local:${resolve(projectRoot)}`
+}
+
+function defaultHostName(env: NodeJS.ProcessEnv): string {
+	return env.WSL_DISTRO_NAME ?? env.HOSTNAME ?? "local-host"
+}
+
+function hostFingerprint(env: NodeJS.ProcessEnv): string {
+	return `host:${env.WSL_DISTRO_NAME ?? "linux"}:${env.HOSTNAME ?? "unknown"}`
 }
 
 export function upsertAgentsFile(path: string): FileInitStatus {
@@ -317,7 +517,11 @@ function configureCodexMcp(input: {
 	readonly runCommand?: SyncCommandRunner
 }): CodexMcpInitStatus {
 	const command = input.codexCommand ?? "codex"
-	const mcpCommand = input.mcpCommand ?? defaultCodexMcpCommand
+	const mcpCommand = [
+		...(input.mcpCommand ?? defaultCodexMcpCommand),
+		"--project-root",
+		input.projectRoot,
+	]
 	const args = ["mcp", "add", codexMcpServerName, "--", ...mcpCommand]
 	const runCommand = input.runCommand ?? runSyncCommand
 	const result = runCommand(command, args, { cwd: input.projectRoot })
@@ -399,7 +603,56 @@ function mcpCommand(args: readonly string[]): CliResult {
 		return success(mcpHelpText())
 	}
 
-	return failure(64, `Unknown mcp option: ${args.join(" ")}\n\n${mcpHelpText()}`)
+	const parsed = parseMcpArgs(args)
+
+	if (parsed.ok) {
+		return success("sando MCP server runs over stdio.\n")
+	}
+
+	return failure(64, `${parsed.error}\n\n${mcpHelpText()}`)
+}
+
+function parseMcpArgs(
+	args: readonly string[],
+):
+	| { readonly ok: true; readonly projectRoot?: string }
+	| { readonly ok: false; readonly error: string } {
+	const options: { projectRoot?: string } = {}
+
+	for (let index = 0; index < args.length; index += 1) {
+		const arg = args[index]
+
+		if (arg === undefined) {
+			continue
+		}
+
+		if (arg === "--project-root") {
+			const value = args[index + 1]
+
+			if (value === undefined) {
+				return { ok: false, error: "Expected a value after --project-root." }
+			}
+
+			options.projectRoot = value
+			index += 1
+			continue
+		}
+
+		if (arg.startsWith("--project-root=")) {
+			options.projectRoot = arg.slice("--project-root=".length)
+			continue
+		}
+
+		return { ok: false, error: `Unknown mcp option: ${arg}` }
+	}
+
+	return { ok: true, ...options }
+}
+
+function mcpProjectRoot(args: readonly string[]): string | undefined {
+	const parsed = parseMcpArgs(args)
+
+	return parsed.ok ? parsed.projectRoot : undefined
 }
 
 function policyCommand(args: readonly string[]): CliResult {
@@ -530,7 +783,7 @@ function policyHelpText(): string {
 
 function mcpHelpText(): string {
 	return `Usage:
-  sando mcp
+  sando mcp [--project-root <path>]
 
 `
 }
@@ -555,11 +808,15 @@ export async function main(): Promise<void> {
 	const argv = process.argv.slice(2)
 
 	if (shouldStartMcpServer(argv)) {
-		await startStdioServer()
+		await startStdioServer(
+			createSandoMcpService({
+				...optionalString("projectRoot", mcpProjectRoot(argv.slice(1))),
+			}),
+		)
 		return
 	}
 
-	const result = runCli()
+	const result = await runCli()
 
 	process.stdout.write(result.stdout)
 	process.stderr.write(result.stderr)
@@ -570,7 +827,9 @@ function shouldStartMcpServer(argv: readonly string[]): boolean {
 	const [command, ...args] = argv
 
 	return (
-		command === "mcp" && !args.some((arg) => arg === "--help" || arg === "-h" || arg === "help")
+		command === "mcp" &&
+		!args.some((arg) => arg === "--help" || arg === "-h" || arg === "help") &&
+		parseMcpArgs(args).ok
 	)
 }
 

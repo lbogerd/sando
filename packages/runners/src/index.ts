@@ -1,6 +1,16 @@
 import { execFile } from "node:child_process"
 import { randomBytes, createHash } from "node:crypto"
-import { copyFile, lstat, mkdir, mkdtemp, readFile, readdir, rm } from "node:fs/promises"
+import {
+	copyFile,
+	lstat,
+	mkdir,
+	mkdtemp,
+	readFile,
+	readdir,
+	readlink,
+	rm,
+	symlink,
+} from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, isAbsolute, join, parse as parsePath, relative, resolve, sep } from "node:path"
 import { promisify } from "node:util"
@@ -9,12 +19,18 @@ import { z } from "zod"
 
 import {
 	type AgentId,
+	type AppendAuditEventResult,
 	type AuthorizeGrantInput,
 	type AuthorizeGrantResult,
+	type CreateRunResult,
+	type FinishRunResult,
 	type GrantRecord,
 	type HostId,
 	type JsonValue,
+	parseAppendAuditEventResult,
 	parseAuthorizeGrantResult,
+	parseCreateRunResult,
+	parseFinishRunResult,
 	parseGrantRecord,
 	parseRequestGrantResult,
 	type ProjectId,
@@ -77,8 +93,14 @@ export const hardcodedSensitiveFileExclusions = {
 	] as const,
 	envPrefix: ".env.",
 	extensions: [".key", ".pem", ".p12", ".pfx"] as const,
-	paths: [".aws/credentials", ".docker/config.json", ".kube/config"] as const,
+	paths: [
+		".aws/credentials",
+		".docker/config.json",
+		".kube/config",
+		".sando/session.json",
+	] as const,
 } as const
+export const sandoSessionFilePath = ".sando/session.json"
 
 const execFileAsync = promisify(execFile)
 const pendingGrantTtlSeconds = 10 * 60
@@ -168,10 +190,33 @@ export type AuthorizedCapability = {
 	readonly grant: GrantRecord
 }
 
+export type CreateHostedRunInput = {
+	readonly command: string
+	readonly grantId: string
+	readonly network: NetworkMode
+	readonly runtime: SandboxRuntimeKind
+	readonly template: string
+}
+
+export type FinishHostedRunInput = {
+	readonly durationMs: number
+	readonly exitCode: number | null
+	readonly runId: RunId
+	readonly status: RunProjectCommandResult["status"]
+}
+
 export type AgentAuthority = {
+	readonly appendAuditEvent?: (input: {
+		readonly grantId?: string
+		readonly metadata?: Record<string, JsonValue>
+		readonly runId?: string
+		readonly type: "command.started" | "command.finished"
+	}) => Promise<Result<AppendAuditEventResult>>
+	readonly createRun?: (input: CreateHostedRunInput) => Promise<Result<CreateRunResult>>
 	readonly ensureCapability: (
 		input: CapabilityExecutionRequest,
 	) => Promise<Result<AuthorizedCapability>>
+	readonly finishRun?: (input: FinishHostedRunInput) => Promise<Result<FinishRunResult>>
 }
 
 export type HostedAgentAuthorityOptions = {
@@ -365,6 +410,56 @@ export class HostedAgentAuthority implements AgentAuthority {
 		return ok({
 			grant: authorized.value.grant,
 		})
+	}
+
+	async createRun(input: CreateHostedRunInput): Promise<Result<CreateRunResult>> {
+		return this.#postJson(
+			"/v1/runs",
+			{
+				projectId: this.#context.projectId,
+				hostId: this.#context.hostId,
+				agentId: this.#context.agentId,
+				grantId: input.grantId,
+				command: input.command,
+				template: input.template,
+				runtime: input.runtime,
+				network: input.network,
+			},
+			parseCreateRunResult,
+		)
+	}
+
+	async finishRun(input: FinishHostedRunInput): Promise<Result<FinishRunResult>> {
+		return this.#postJson(
+			`/v1/runs/${encodeURIComponent(input.runId)}/finish`,
+			{
+				status: input.status,
+				exitCode: input.exitCode,
+				durationMs: input.durationMs,
+			},
+			parseFinishRunResult,
+		)
+	}
+
+	async appendAuditEvent(input: {
+		readonly grantId?: string
+		readonly metadata?: Record<string, JsonValue>
+		readonly runId?: string
+		readonly type: "command.started" | "command.finished"
+	}): Promise<Result<AppendAuditEventResult>> {
+		return this.#postJson(
+			"/v1/audit-events",
+			{
+				type: input.type,
+				projectId: this.#context.projectId,
+				hostId: this.#context.hostId,
+				agentId: this.#context.agentId,
+				...(input.grantId === undefined ? {} : { grantId: input.grantId }),
+				...(input.runId === undefined ? {} : { runId: input.runId }),
+				metadata: input.metadata ?? {},
+			},
+			parseAppendAuditEventResult,
+		)
 	}
 
 	async #requestGrant(input: RequestGrantInput): Promise<Result<RequestGrantResult>> {
@@ -781,29 +876,104 @@ export async function runProjectCommand(
 
 	const authority = options.authority
 
-	if (authority !== undefined) {
-		const authorized = await authority.ensureCapability(
-			capabilityExecutionRequest(input.value, effectivePolicy.value),
+	if (authority === undefined) {
+		return err(
+			sandoError({
+				code: "GRANT_REQUIRED",
+				message: "Hosted Agent Auth is required before execution.",
+			}),
 		)
-
-		if (!authorized.ok) {
-			return authorized
-		}
 	}
 
-	const archiveFiles = await selectArchiveFiles({ projectRoot: policy.value.projectRoot })
+	const capabilityRequest = capabilityExecutionRequest(input.value, effectivePolicy.value)
+	const authorized = await authority.ensureCapability(capabilityRequest)
+
+	if (!authorized.ok) {
+		return authorized
+	}
+
+	const hostedRun =
+		authority.createRun === undefined
+			? undefined
+			: await authority.createRun({
+					command: input.value.command,
+					grantId: authorized.value.grant.id,
+					network: effectivePolicy.value.network,
+					runtime: effectivePolicy.value.runtime,
+					template: effectivePolicy.value.template,
+				})
+
+	if (hostedRun !== undefined && !hostedRun.ok) {
+		return hostedRun
+	}
+
+	const runId =
+		hostedRun?.ok === true ? hostedRun.value.run.id : asRunId(options.runId ?? createRunId())
+
+	const started = Date.now()
+	const startedAudit =
+		authority.appendAuditEvent === undefined
+			? undefined
+			: await authority.appendAuditEvent({
+					type: "command.started",
+					grantId: authorized.value.grant.id,
+					runId,
+					metadata: {
+						command: input.value.command,
+						commandHash: capabilityRequest.commandHash,
+						network: effectivePolicy.value.network,
+						runtime: effectivePolicy.value.runtime,
+						template: effectivePolicy.value.template,
+						timeoutSeconds: effectivePolicy.value.timeoutSeconds,
+					},
+				})
+
+	if (startedAudit !== undefined && !startedAudit.ok) {
+		return startedAudit
+	}
+
+	const result = await runProjectCommandLocally(input.value, {
+		effectivePolicy: effectivePolicy.value,
+		projectRoot: policy.value.projectRoot,
+		runId,
+		...(options.runsRootPath === undefined ? {} : { runsRootPath: options.runsRootPath }),
+		...(options.runtime === undefined ? {} : { runtime: options.runtime }),
+	})
+
+	const finish =
+		authority.finishRun === undefined
+			? undefined
+			: await authority.finishRun(finishHostedRunInput(result, runId, Date.now() - started))
+
+	if (finish !== undefined && !finish.ok) {
+		return finish
+	}
+
+	return result
+}
+
+async function runProjectCommandLocally(
+	input: RunProjectCommandInput,
+	options: {
+		readonly effectivePolicy: EffectivePolicy
+		readonly projectRoot: string
+		readonly runId: RunId
+		readonly runsRootPath?: string
+		readonly runtime?: SandboxRuntime
+	},
+): Promise<Result<RunProjectCommandResult>> {
+	const archiveFiles = await selectArchiveFiles({ projectRoot: options.projectRoot })
 
 	if (!archiveFiles.ok) {
 		return archiveFiles
 	}
 
-	const runId = asRunId(options.runId ?? createRunId())
 	const runtime =
 		options.runtime ??
 		new PodmanRuntime({
 			runsRootPath: options.runsRootPath,
 		})
-	const workspace = await createWorkspaceSnapshot(archiveFiles.value, runId)
+	const workspace = await createWorkspaceSnapshot(archiveFiles.value, options.runId)
 
 	if (!workspace.ok) {
 		return workspace
@@ -811,12 +981,12 @@ export async function runProjectCommand(
 
 	try {
 		const sandbox = await runtime.createSandbox({
-			runId,
-			template: effectivePolicy.value.template,
-			runtime: effectivePolicy.value.runtime,
-			network: effectivePolicy.value.network,
-			resources: effectivePolicy.value.resources,
-			timeoutSeconds: effectivePolicy.value.timeoutSeconds,
+			runId: options.runId,
+			template: options.effectivePolicy.template,
+			runtime: options.effectivePolicy.runtime,
+			network: options.effectivePolicy.network,
+			resources: options.effectivePolicy.resources,
+			timeoutSeconds: options.effectivePolicy.timeoutSeconds,
 		})
 
 		if (!sandbox.ok) {
@@ -831,8 +1001,8 @@ export async function runProjectCommand(
 			}
 
 			const commandResult = await runtime.runCommand(handle, {
-				command: input.value.command,
-				timeoutSeconds: effectivePolicy.value.timeoutSeconds,
+				command: input.command,
+				timeoutSeconds: options.effectivePolicy.timeoutSeconds,
 			})
 
 			if (!commandResult.ok) {
@@ -848,13 +1018,13 @@ export async function runProjectCommand(
 			return ok(
 				runProjectCommandResult({
 					artifacts: artifacts.value,
-					command: input.value,
+					command: input,
 					durationMs: commandResult.value.durationMs,
 					exitCode: commandResult.value.exitCode,
-					network: effectivePolicy.value.network,
-					runId,
+					network: options.effectivePolicy.network,
+					runId: options.runId,
 					status: commandResult.value.status,
-					timeoutSeconds: effectivePolicy.value.timeoutSeconds,
+					timeoutSeconds: options.effectivePolicy.timeoutSeconds,
 				}),
 			)
 		})
@@ -1227,7 +1397,7 @@ async function createWorkspaceSnapshot(
 			const destination = join(root.value, file)
 
 			await mkdir(dirname(destination), { recursive: true })
-			await copyFile(source, destination)
+			await copyWorkspaceSnapshotEntry(source, destination)
 		}
 
 		return ok({ path: root.value })
@@ -1238,6 +1408,17 @@ async function createWorkspaceSnapshot(
 			path: root.value,
 		})
 	}
+}
+
+async function copyWorkspaceSnapshotEntry(source: string, destination: string): Promise<void> {
+	const file = await lstat(source)
+
+	if (file.isSymbolicLink()) {
+		await symlink(await readlink(source), destination)
+		return
+	}
+
+	await copyFile(source, destination)
 }
 
 async function createTempWorkspaceRoot(runId: RunId): Promise<Result<string>> {
@@ -1308,6 +1489,28 @@ function summarizeRun(input: {
 
 function artifactUri(runId: RunId, name: string): SandoUri {
 	return `sando://artifacts/${artifactIdForRunArtifact(runId, name)}`
+}
+
+function finishHostedRunInput(
+	result: Result<RunProjectCommandResult>,
+	runId: RunId,
+	fallbackDurationMs: number,
+): FinishHostedRunInput {
+	if (result.ok) {
+		return {
+			runId,
+			status: result.value.status,
+			exitCode: result.value.exitCode,
+			durationMs: result.value.durationMs,
+		}
+	}
+
+	return {
+		runId,
+		status: result.error.code === "COMMAND_TIMED_OUT" ? "timed_out" : "failed",
+		exitCode: null,
+		durationMs: Math.max(0, fallbackDurationMs),
+	}
 }
 
 async function readRunTextArtifact(

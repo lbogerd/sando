@@ -10,6 +10,7 @@ import {
 	type UserId,
 } from "@sando/shared"
 
+import type { AuditEventRepository } from "./audit-events.js"
 import type { CurrentUserResolver } from "./current-user.js"
 import { readJsonBody, unauthorizedError } from "./http.js"
 
@@ -29,6 +30,7 @@ export type MemoryHostRepositoryOptions = {
 }
 
 export type HostRoutesOptions = {
+	readonly auditEventRepository?: AuditEventRepository
 	readonly currentUser: CurrentUserResolver
 	readonly hostRepository: HostRepository
 	readonly now: () => Date
@@ -117,6 +119,21 @@ export function createHostRoutes(options: HostRoutesOptions): Hono {
 			userId: currentUser.userId,
 			now: options.now(),
 		})
+
+		if (result.created) {
+			await options.auditEventRepository?.appendAuditEvent({
+				type: "host.registered",
+				userId: currentUser.userId,
+				hostId: result.host.id,
+				now: options.now(),
+				metadata: {
+					name: result.host.name,
+					platform: result.host.platform,
+					runtime: result.host.runtime,
+					fingerprint: result.host.fingerprint,
+				},
+			})
+		}
 
 		return context.json(result, result.created ? 201 : 200)
 	})

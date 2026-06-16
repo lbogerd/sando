@@ -1,5 +1,15 @@
 import { execFile } from "node:child_process"
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import {
+	cp,
+	lstat,
+	mkdir,
+	mkdtemp,
+	readFile,
+	readlink,
+	rm,
+	symlink,
+	writeFile,
+} from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -636,6 +646,13 @@ describe("runProjectCommand", () => {
 		const artifactRoot = join(await tempProject(), "artifacts")
 		const artifacts = await writeRunArtifactBundle(artifactRoot)
 		const calls: string[] = []
+		const authority: AgentAuthority = {
+			async ensureCapability(input) {
+				return ok({
+					grant: grantRecord(input.commandHash),
+				})
+			},
+		}
 		const runtime: SandboxRuntime = {
 			kind: "podman",
 			createSandbox: async (input) => {
@@ -706,6 +723,7 @@ describe("runProjectCommand", () => {
 				command: "pnpm test",
 			},
 			{
+				authority,
 				projectRoot: root,
 				runId,
 				runtime,
@@ -794,6 +812,64 @@ describe("runProjectCommand", () => {
 				timeoutSeconds: 90,
 			},
 		])
+		expect(calls).toEqual(["create", "upload", "run", "collect", "destroy:sandbox-id"])
+	})
+
+	it("preserves selected symlinks when creating the workspace snapshot", async () => {
+		const root = await fixtureGitProject()
+		await mkdir(join(root, ".agents", "skills"), { recursive: true })
+		await mkdir(join(root, ".claude"), { recursive: true })
+		await writeFile(join(root, "AGENTS.md"), "# Agents\n")
+		await writeFile(join(root, ".agents", "skills", "SKILL.md"), "# Skill\n")
+		await symlink("AGENTS.md", join(root, "CLAUDE.md"))
+		await symlink("../.agents/skills", join(root, ".claude", "skills"), "dir")
+
+		const calls: string[] = []
+		const authority: AgentAuthority = {
+			async ensureCapability(input) {
+				return ok({
+					grant: grantRecord(input.commandHash),
+				})
+			},
+		}
+		const runtime = fakeRuntime(
+			calls,
+			await writeRunArtifactBundle(join(await tempProject(), "artifacts")),
+		)
+
+		const result = await runProjectCommand(
+			{
+				command: "pnpm test",
+			},
+			{
+				authority,
+				projectRoot: root,
+				runId: "run_symlinks",
+				runtime: {
+					...runtime,
+					uploadWorkspace: async (_handle, archive) => {
+						calls.push("upload")
+
+						const claudeLink = await lstat(join(archive.path, "CLAUDE.md"))
+						const skillsLink = await lstat(join(archive.path, ".claude", "skills"))
+
+						expect(claudeLink.isSymbolicLink()).toBe(true)
+						await expect(readlink(join(archive.path, "CLAUDE.md"))).resolves.toBe("AGENTS.md")
+						expect(skillsLink.isSymbolicLink()).toBe(true)
+						await expect(readlink(join(archive.path, ".claude", "skills"))).resolves.toBe(
+							"../.agents/skills",
+						)
+
+						return ok(undefined)
+					},
+				},
+			},
+		)
+
+		expect(result.ok, result.ok ? "" : JSON.stringify(result.error)).toBe(true)
+		if (!result.ok) {
+			return
+		}
 		expect(calls).toEqual(["create", "upload", "run", "collect", "destroy:sandbox-id"])
 	})
 

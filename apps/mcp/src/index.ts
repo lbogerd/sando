@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { existsSync, readFileSync } from "node:fs"
+import { join, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
@@ -8,6 +10,7 @@ import { z } from "zod"
 import {
 	compileEffectivePolicy,
 	createHostedAgentAuthorityFromEnv,
+	HostedAgentAuthority,
 	loadProjectPolicy,
 	readRunArtifact,
 	readRunDiff,
@@ -17,6 +20,7 @@ import {
 	type RunProjectCommandOptions,
 } from "@sando/runners"
 import {
+	asId,
 	defaultSandoPolicy,
 	err,
 	ok,
@@ -62,7 +66,10 @@ export function createSandoMcpService(options: CreateSandoMcpServiceOptions = {}
 		options.authority === undefined
 			? {
 					...options,
-					...optionalAuthority(createHostedAgentAuthorityFromEnv()),
+					...optionalAuthority(
+						createHostedAgentAuthorityFromEnv() ??
+							createHostedAgentAuthorityFromProjectConfig(options.projectRoot),
+					),
 				}
 			: options
 
@@ -156,6 +163,64 @@ export function createSandoMcpService(options: CreateSandoMcpServiceOptions = {}
 			})
 		},
 	}
+}
+
+function createHostedAgentAuthorityFromProjectConfig(
+	projectRoot: string | undefined,
+): HostedAgentAuthority | undefined {
+	if (projectRoot === undefined) {
+		return undefined
+	}
+
+	const root = resolve(projectRoot)
+	const project = readJsonObject(join(root, ".sando", "project.json"))
+	const session = readJsonObject(join(root, ".sando", "session.json"))
+
+	if (project === undefined || session === undefined) {
+		return undefined
+	}
+
+	const apiUrl = stringField(project, "apiUrl")
+	const projectId = stringField(project, "projectId")
+	const hostId = stringField(project, "hostId")
+	const agentId = stringField(project, "agentId")
+	const token = stringField(session, "token")
+
+	if (
+		apiUrl === undefined ||
+		projectId === undefined ||
+		hostId === undefined ||
+		agentId === undefined ||
+		token === undefined
+	) {
+		return undefined
+	}
+
+	return new HostedAgentAuthority({
+		apiUrl,
+		token,
+		projectId: asId("project", projectId),
+		hostId: asId("host", hostId),
+		agentId: asId("agent", agentId),
+	})
+}
+
+function readJsonObject(path: string): Record<string, unknown> | undefined {
+	if (!existsSync(path)) {
+		return undefined
+	}
+
+	const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown
+
+	return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+		? (parsed as Record<string, unknown>)
+		: undefined
+}
+
+function stringField(value: Record<string, unknown>, key: string): string | undefined {
+	const field = value[key]
+
+	return typeof field === "string" && field.trim().length > 0 ? field : undefined
 }
 
 export function createSandoMcpServer(

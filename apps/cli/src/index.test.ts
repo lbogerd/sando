@@ -8,16 +8,16 @@ import { defaultSandoPolicy } from "@sando/shared"
 import {
 	appName,
 	cliVersion,
-	defaultCodexMcpCommand,
 	defaultPolicyFile,
 	defaultProjectFile,
+	defaultSessionFile,
 	initializeSandoProject,
 	runCli,
 } from "./index.js"
 
 describe("sando CLI", () => {
-	it("prints help", () => {
-		const result = runCli(["help"])
+	it("prints help", async () => {
+		const result = await runCli(["help"])
 
 		expect(result).toMatchObject({
 			exitCode: 0,
@@ -30,16 +30,16 @@ describe("sando CLI", () => {
 		expect(result.stdout).not.toContain("sando auth")
 	})
 
-	it("prints version", () => {
-		expect(runCli(["version"])).toEqual({
+	it("prints version", async () => {
+		await expect(runCli(["version"])).resolves.toEqual({
 			exitCode: 0,
 			stdout: `${appName} ${cliVersion}\n`,
 			stderr: "",
 		})
 	})
 
-	it("prints status metadata", () => {
-		const result = runCli(["status"])
+	it("prints status metadata", async () => {
+		const result = await runCli(["status"])
 
 		expect(result.exitCode).toBe(0)
 		expect(result.stdout).toContain("default template: node-ts")
@@ -47,15 +47,15 @@ describe("sando CLI", () => {
 		expect(result.stdout).toContain("supported networks: none, default")
 	})
 
-	it("prints default policy JSON", () => {
-		const result = runCli(["policy", "defaults"])
+	it("prints default policy JSON", async () => {
+		const result = await runCli(["policy", "defaults"])
 
 		expect(result.exitCode).toBe(0)
 		expect(JSON.parse(result.stdout)).toEqual(defaultSandoPolicy)
 	})
 
-	it("prints a small doctor report", () => {
-		const result = runCli(["doctor"], {
+	it("prints a small doctor report", async () => {
+		const result = await runCli(["doctor"], {
 			SANDO_API_URL: "https://api.example.test",
 			SANDO_CODEX_BIN: "missing-codex-for-test",
 			WSL_DISTRO_NAME: "Ubuntu",
@@ -77,17 +77,17 @@ describe("sando CLI", () => {
 		})
 	})
 
-	it("returns an EX_USAGE-style error for unknown commands", () => {
-		const result = runCli(["wat"])
+	it("returns an EX_USAGE-style error for unknown commands", async () => {
+		const result = await runCli(["wat"])
 
 		expect(result.exitCode).toBe(64)
 		expect(result.stdout).toBe("")
 		expect(result.stderr).toContain("Unknown command: wat")
 	})
 
-	it("does not expose removed direct run or local auth commands", () => {
+	it("does not expose removed direct run or local auth commands", async () => {
 		for (const command of ["run", "auth", "login"]) {
-			const result = runCli([command])
+			const result = await runCli([command])
 
 			expect(result.exitCode).toBe(64)
 			expect(result.stdout).toBe("")
@@ -95,15 +95,21 @@ describe("sando CLI", () => {
 		}
 	})
 
-	it("initializes project files and configures Codex MCP", () => {
+	it("initializes project files and configures Codex MCP", async () => {
 		const root = mkdtempSync(join(tmpdir(), "sando-cli-init-"))
 		const calls: Array<{ args: readonly string[]; command: string; cwd: string }> = []
 
 		try {
 			writeFileSync(join(root, "package.json"), JSON.stringify({ name: "fixture-app" }))
 
-			const result = initializeSandoProject({
+			const result = await initializeSandoProject({
 				codex: true,
+				env: {
+					SANDO_API_URL: "https://api.example.test",
+					WSL_DISTRO_NAME: "Ubuntu",
+					HOSTNAME: "host-a",
+				},
+				fetch: fakeHostedFetch(),
 				now: new Date("2026-06-15T12:00:00.000Z"),
 				projectRoot: root,
 				runCommand: (command, args, options) => {
@@ -120,7 +126,7 @@ describe("sando CLI", () => {
 				projectRoot: root,
 				project: {
 					path: join(root, defaultProjectFile),
-					status: "created",
+					status: "updated",
 				},
 				policy: {
 					path: join(root, defaultPolicyFile),
@@ -132,24 +138,32 @@ describe("sando CLI", () => {
 				},
 				codex: {
 					command: "codex",
-					args: ["mcp", "add", "sando", "--", ...defaultCodexMcpCommand],
+					args: ["mcp", "add", "sando", "--", "sando", "mcp", "--project-root", root],
 					status: "configured",
 				},
 			})
 			expect(calls).toEqual([
 				{
 					command: "codex",
-					args: ["mcp", "add", "sando", "--", ...defaultCodexMcpCommand],
+					args: ["mcp", "add", "sando", "--", "sando", "mcp", "--project-root", root],
 					cwd: root,
 				},
 			])
-			expect(JSON.parse(readFileSync(join(root, defaultProjectFile), "utf8"))).toEqual({
+			expect(JSON.parse(readFileSync(join(root, defaultProjectFile), "utf8"))).toMatchObject({
 				version: 1,
 				name: "fixture-app",
 				createdAt: "2026-06-15T12:00:00.000Z",
+				apiUrl: "https://api.example.test",
+				projectId: "proj_123",
+				hostId: "host_123",
+				agentId: "agent_123",
 				mcp: {
 					serverName: "sando",
 				},
+			})
+			expect(JSON.parse(readFileSync(join(root, defaultSessionFile), "utf8"))).toMatchObject({
+				version: 1,
+				token: "session_123",
 			})
 			expect(JSON.parse(readFileSync(join(root, defaultPolicyFile), "utf8"))).toEqual(
 				defaultSandoPolicy,
@@ -160,16 +174,20 @@ describe("sando CLI", () => {
 		}
 	})
 
-	it("keeps init idempotent and reports unavailable Codex without failing setup", () => {
+	it("keeps init idempotent and reports unavailable Codex without failing setup", async () => {
 		const root = mkdtempSync(join(tmpdir(), "sando-cli-init-"))
 
 		try {
-			const first = initializeSandoProject({
+			const first = await initializeSandoProject({
 				codex: false,
 				projectRoot: root,
 			})
-			const second = initializeSandoProject({
+			const second = await initializeSandoProject({
 				codex: true,
+				env: {
+					SANDO_API_URL: "https://api.example.test",
+				},
+				fetch: fakeHostedFetch(),
 				projectRoot: root,
 				runCommand: () => ({
 					error: Object.assign(new Error("spawn codex ENOENT"), { code: "ENOENT" }),
@@ -180,7 +198,7 @@ describe("sando CLI", () => {
 			})
 
 			expect(first.project.status).toBe("created")
-			expect(second.project.status).toBe("exists")
+			expect(second.project.status).toBe("updated")
 			expect(second.policy.status).toBe("exists")
 			expect(second.agents.status).toBe("exists")
 			expect(second.codex).toMatchObject({
@@ -192,3 +210,60 @@ describe("sando CLI", () => {
 		}
 	})
 })
+
+function fakeHostedFetch(): typeof fetch {
+	return async (url, init) => {
+		const path = new URL(String(url)).pathname
+		const body = init?.body === undefined ? undefined : JSON.parse(String(init.body))
+
+		if (path === "/api/auth/sign-in/anonymous") {
+			return Response.json({
+				token: "session_123",
+				user: {
+					id: "user_123",
+				},
+			})
+		}
+
+		if (path === "/v1/projects/register") {
+			return Response.json(
+				{
+					project: {
+						id: "proj_123",
+						...(typeof body === "object" && body !== null ? body : {}),
+					},
+					created: true,
+				},
+				{ status: 201 },
+			)
+		}
+
+		if (path === "/v1/hosts/register") {
+			return Response.json(
+				{
+					host: {
+						id: "host_123",
+						...(typeof body === "object" && body !== null ? body : {}),
+					},
+					created: true,
+				},
+				{ status: 201 },
+			)
+		}
+
+		if (path === "/v1/agents/register") {
+			return Response.json(
+				{
+					agent: {
+						id: "agent_123",
+						...(typeof body === "object" && body !== null ? body : {}),
+					},
+					created: true,
+				},
+				{ status: 201 },
+			)
+		}
+
+		return Response.json({ error: "not found" }, { status: 404 })
+	}
+}

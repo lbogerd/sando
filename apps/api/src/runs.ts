@@ -15,6 +15,7 @@ import {
 	type UserId,
 } from "@sando/shared"
 
+import type { AuditEventRepository } from "./audit-events.js"
 import type { CurrentUserResolver } from "./current-user.js"
 import { readJsonBody, unauthorizedError } from "./http.js"
 
@@ -40,6 +41,7 @@ export type MemoryRunRepositoryOptions = {
 }
 
 export type RunRoutesOptions = {
+	readonly auditEventRepository?: AuditEventRepository
 	readonly currentUser: CurrentUserResolver
 	readonly now: () => Date
 	readonly runRepository: RunRepository
@@ -119,6 +121,23 @@ export function createRunRoutes(options: RunRoutesOptions): Hono {
 			userId: currentUser.userId,
 		})
 
+		await options.auditEventRepository?.appendAuditEvent({
+			type: "run.created",
+			userId: currentUser.userId,
+			projectId: result.run.projectId,
+			hostId: result.run.hostId,
+			agentId: result.run.agentId,
+			grantId: result.run.grantId,
+			runId: result.run.id,
+			now: options.now(),
+			metadata: {
+				command: result.run.command,
+				template: result.run.template,
+				runtime: result.run.runtime,
+				network: result.run.network,
+			},
+		})
+
 		return context.json(result, 201)
 	})
 
@@ -176,6 +195,23 @@ export function createRunRoutes(options: RunRoutesOptions): Hono {
 				404,
 			)
 		}
+
+		await options.auditEventRepository?.appendAuditEvent({
+			type: "command.finished",
+			userId: currentUser.userId,
+			projectId: result.run.projectId,
+			hostId: result.run.hostId,
+			agentId: result.run.agentId,
+			grantId: result.run.grantId,
+			runId: result.run.id,
+			now: options.now(),
+			metadata: {
+				command: result.run.command,
+				status: result.run.status,
+				exitCode: result.run.exitCode ?? null,
+				durationMs: result.run.durationMs ?? 0,
+			},
+		})
 
 		return context.json(result)
 	})

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import { asId, runProjectCommandHash, type AuditEventRecord } from "@sando/shared"
 
 import { type AppendAuditEventCommand, type AuditEventRepository } from "./audit-events.js"
+import { createBearerTokenCurrentUserResolver } from "./current-user.js"
 import { createMemoryGrantRepository } from "./grants.js"
 import { createHostedApp } from "./index.js"
 
@@ -55,6 +56,54 @@ describe("grant API routes", () => {
 		expect(html).toContain("Approve for 30 minutes")
 		expect(html).toContain("Deny")
 		expect(audit.events.map((event) => event.type)).toEqual(["grant.requested"])
+	})
+
+	it("lets the browser approval URL decide a bearer-created grant", async () => {
+		let now = requestedAt
+		const app = createHostedApp({
+			currentUser: createBearerTokenCurrentUserResolver({
+				token: "session-token",
+				userId,
+			}),
+			grantRepository: createMemoryGrantRepository({ generateId: idSequence("one") }),
+			now: () => now,
+		})
+		const authenticatedRequest = jsonRequest(requestBody("pnpm test"), {
+			authorization: "Bearer session-token",
+		})
+
+		await app.request("/v1/grants/request", authenticatedRequest)
+
+		const approval = await app.request("/v1/grants/grant_one/approval")
+		const html = await approval.text()
+
+		expect(approval.status).toBe(200)
+		expect(html).toContain("Codex wants to run a project command")
+		expect(html).toContain("Approve once")
+
+		now = approvedAt
+		const approve = await app.request("/v1/grants/grant_one/approve", {
+			method: "POST",
+			body: new URLSearchParams({ scope: "one_shot" }),
+			headers: {
+				accept: "text/html",
+				"content-type": "application/x-www-form-urlencoded",
+			},
+		})
+		const approvedHtml = await approve.text()
+		const authorize = await app.request(
+			"/v1/grants/authorize",
+			jsonRequest(
+				{ ...requestBody("pnpm test"), grantId: "grant_one" },
+				{
+					authorization: "Bearer session-token",
+				},
+			),
+		)
+
+		expect(approve.status).toBe(200)
+		expect(approvedHtml).toContain("Grant approved. You can return to Codex.")
+		expect(authorize.status).toBe(200)
 	})
 
 	it("approve once permits only the approved command hash", async () => {
@@ -286,11 +335,11 @@ function requestBody(command: string) {
 	}
 }
 
-function jsonRequest(body: unknown): RequestInit {
+function jsonRequest(body: unknown, headers: Record<string, string> = {}): RequestInit {
 	return {
 		method: "POST",
 		body: JSON.stringify(body),
-		headers: { "content-type": "application/json" },
+		headers: { ...headers, "content-type": "application/json" },
 	}
 }
 

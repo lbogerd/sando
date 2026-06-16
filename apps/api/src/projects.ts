@@ -12,6 +12,7 @@ import {
 	type UserId,
 } from "@sando/shared"
 
+import type { AuditEventRepository } from "./audit-events.js"
 import type { CurrentUserResolver } from "./current-user.js"
 import { readJsonBody, unauthorizedError } from "./http.js"
 
@@ -39,6 +40,7 @@ export type MemoryProjectRepositoryOptions = {
 }
 
 export type ProjectRoutesOptions = {
+	readonly auditEventRepository?: AuditEventRepository
 	readonly currentUser: CurrentUserResolver
 	readonly now: () => Date
 	readonly projectRepository: ProjectRepository
@@ -124,6 +126,20 @@ export function createProjectRoutes(options: ProjectRoutesOptions): Hono {
 			userId: currentUser.userId,
 			now: options.now(),
 		})
+
+		if (result.created) {
+			await options.auditEventRepository?.appendAuditEvent({
+				type: "project.initialized",
+				userId: currentUser.userId,
+				projectId: result.project.id,
+				now: options.now(),
+				metadata: {
+					name: result.project.name,
+					localFingerprint: result.project.localFingerprint,
+					policyId: result.project.policyId,
+				},
+			})
+		}
 
 		return context.json(result, result.created ? 201 : 200)
 	})

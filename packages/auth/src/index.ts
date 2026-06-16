@@ -1,12 +1,11 @@
 import { drizzleAdapter, type DB as DrizzleDatabase } from "@better-auth/drizzle-adapter"
 import { betterAuth, type BetterAuthOptions } from "better-auth"
+import { anonymous, bearer } from "better-auth/plugins"
 
 import { betterAuthSchema } from "@sando/db"
 
 export const authBasePath = "/api/auth"
 export const authAppName = "sando"
-export const defaultMinimumPasswordLength = 8
-export const defaultMaximumPasswordLength = 128
 
 export type AuthDatabase = NonNullable<BetterAuthOptions["database"]>
 export type SandoAuth = ReturnType<typeof betterAuth>
@@ -32,13 +31,7 @@ export function createSandoAuthOptions(input: SandoAuthOptions): BetterAuthOptio
 		...(input.secret === undefined ? {} : { secret: input.secret }),
 		...(input.baseURL === undefined ? {} : { baseURL: input.baseURL }),
 		...(input.trustedOrigins === undefined ? {} : { trustedOrigins: [...input.trustedOrigins] }),
-		emailAndPassword: {
-			enabled: true,
-			minPasswordLength: defaultMinimumPasswordLength,
-			maxPasswordLength: defaultMaximumPasswordLength,
-			requireEmailVerification: false,
-			autoSignIn: true,
-		},
+		plugins: [anonymous(), bearer()],
 	}
 }
 
