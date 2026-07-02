@@ -32,6 +32,7 @@ import type { ArtifactBundle, SandboxHandle, SandboxRuntime } from "@sando/runti
 import {
 	type AgentAuthority,
 	artifactIdForRunArtifact,
+	BetterAuthAgentAuthority,
 	compileEffectivePolicy,
 	filterArchiveFiles,
 	filterSensitiveArchiveFiles,
@@ -813,6 +814,163 @@ describe("runProjectCommand", () => {
 			},
 		])
 		expect(calls).toEqual(["create", "upload", "run", "collect", "destroy:sandbox-id"])
+	})
+
+	it("registers hosted artifact metadata after local execution succeeds", async () => {
+		const root = await fixtureGitProject()
+		await addFixtureWorkingTreeFiles(root)
+		const runId = asId("run", "run_registered")
+		const artifactRoot = join(await tempProject(), "artifacts")
+		const artifacts = await writeRunArtifactBundle(artifactRoot)
+		const calls: string[] = []
+		const registered: unknown[] = []
+		const authority: AgentAuthority = {
+			async ensureCapability(input) {
+				calls.push("authorize")
+				return ok({
+					grant: grantRecord(input.commandHash),
+				})
+			},
+			async finishRun(input) {
+				calls.push("finish")
+				expect(input).toMatchObject({
+					runId,
+					status: "succeeded",
+					exitCode: 0,
+				})
+
+				return ok({
+					run: {
+						id: runId,
+						userId: asId("user", "user_123"),
+						projectId: asId("project", "proj_123"),
+						hostId: asId("host", "host_123"),
+						agentId: asId("agent", "agent_123"),
+						grantId: asId("grant", "grant_authorized"),
+						command: "pnpm test",
+						template: "node-ts",
+						runtime: "podman",
+						network: "none",
+						status: "succeeded",
+					},
+				})
+			},
+			async registerArtifacts(input) {
+				calls.push("register")
+				registered.push(...input.artifacts)
+
+				return ok({ artifacts: [] })
+			},
+		}
+		const runtime = fakeRuntime(calls, artifacts)
+
+		const result = await runProjectCommand(
+			{
+				command: "pnpm test",
+			},
+			{
+				authority,
+				projectRoot: root,
+				runId,
+				runtime,
+			},
+		)
+
+		expect(result.ok).toBe(true)
+		expect(calls).toEqual([
+			"authorize",
+			"create",
+			"upload",
+			"run",
+			"collect",
+			"destroy:sandbox-id",
+			"finish",
+			"register",
+		])
+		expect(registered).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					name: "logs.txt",
+					uri: `sando://artifacts/${artifactIdForRunArtifact(runId, "logs.txt")}`,
+				}),
+				expect.objectContaining({
+					name: "diff.patch",
+					uri: `sando://artifacts/${artifactIdForRunArtifact(runId, "diff.patch")}`,
+				}),
+			]),
+		)
+	})
+
+	it("maps Better Auth authority artifact refs to hosted metadata requests", async () => {
+		const requests: Array<{
+			readonly authorization: string | null
+			readonly body: unknown
+			readonly path: string
+		}> = []
+		const authority = new BetterAuthAgentAuthority({
+			apiUrl: "https://api.example.test",
+			token: "session_123",
+			projectId: asId("project", "proj_123"),
+			hostId: asId("host", "host_123"),
+			agentId: asId("agent", "agent_123"),
+			fetch: async (url, init) => {
+				const parsed = new URL(String(url))
+				requests.push({
+					path: parsed.pathname,
+					authorization: new Headers(init?.headers).get("authorization"),
+					body: init?.body === undefined ? undefined : JSON.parse(String(init.body)),
+				})
+
+				return Response.json(
+					{
+						artifact: {
+							id: "art_logs",
+							runId: "run_123",
+							projectId: "proj_123",
+							name: "logs.txt",
+							uri: "sando://artifacts/art_logs",
+							path: "sando://artifacts/art_logs",
+							contentType: "text/plain",
+							sizeBytes: 5,
+							storageKey: "sando://artifacts/art_logs",
+							private: true,
+							createdAt: "2026-06-14T18:00:00.000Z",
+						},
+					},
+					{ status: 201 },
+				)
+			},
+		})
+
+		const result = await authority.registerArtifacts({
+			runId: asId("run", "run_123"),
+			artifacts: [
+				{
+					id: asId("artifact", "art_logs"),
+					name: "logs.txt",
+					uri: "sando://artifacts/art_logs",
+					contentType: "text/plain",
+					sizeBytes: 5,
+				},
+			],
+		})
+
+		expect(result.ok).toBe(true)
+		expect(requests).toEqual([
+			{
+				path: "/v1/runs/run_123/artifacts",
+				authorization: "Bearer session_123",
+				body: {
+					projectId: "proj_123",
+					name: "logs.txt",
+					uri: "sando://artifacts/art_logs",
+					path: "sando://artifacts/art_logs",
+					contentType: "text/plain",
+					sizeBytes: 5,
+					private: true,
+				},
+			},
+		])
 	})
 
 	it("preserves selected symlinks when creating the workspace snapshot", async () => {

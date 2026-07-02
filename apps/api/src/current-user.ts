@@ -45,9 +45,9 @@ export function createBearerTokenCurrentUserResolver(input: {
 		request.headers.get("authorization") === expectedHeader ? { userId: input.userId } : null
 }
 
-export function createBetterAuthCurrentUserResolver(
-	auth: Pick<SandoAuth, "api">,
-): CurrentUserResolver {
+export function createBetterAuthCurrentUserResolver(auth: {
+	readonly api: Pick<SandoAuth["api"], "getSession">
+}): CurrentUserResolver {
 	return async (request) => {
 		const session = await auth.api
 			.getSession({

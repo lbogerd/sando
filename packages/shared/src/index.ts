@@ -573,6 +573,7 @@ export const artifactRecordSchema = z.object({
 	runId: idSchema("run", "Expected a run ID."),
 	projectId: idSchema("project", "Expected a project ID."),
 	name: nonEmptyStringSchema,
+	uri: sandoUriSchema,
 	path: nonEmptyStringSchema,
 	contentType: nonEmptyStringSchema.optional(),
 	sizeBytes: nonNegativeIntegerSchema.optional(),
@@ -583,6 +584,26 @@ export const artifactRecordSchema = z.object({
 })
 
 export type ArtifactRecord = z.infer<typeof artifactRecordSchema>
+
+export const createArtifactMetadataInputSchema = z.object({
+	runId: idSchema("run", "Expected a run ID."),
+	projectId: idSchema("project", "Expected a project ID."),
+	name: nonEmptyStringSchema,
+	uri: sandoUriSchema,
+	path: nonEmptyStringSchema,
+	contentType: nonEmptyStringSchema.optional(),
+	sizeBytes: nonNegativeIntegerSchema.optional(),
+	private: z.literal(true, "Expected a private artifact.").default(true),
+	retentionExpiresAt: nonEmptyStringSchema.optional(),
+})
+
+export type CreateArtifactMetadataInput = z.infer<typeof createArtifactMetadataInputSchema>
+
+export const createArtifactMetadataResultSchema = z.object({
+	artifact: artifactRecordSchema,
+})
+
+export type CreateArtifactMetadataResult = z.infer<typeof createArtifactMetadataResultSchema>
 
 export const listRunArtifactsResultSchema = z.object({
 	artifacts: z.array(artifactRecordSchema),
@@ -602,6 +623,42 @@ export function parseArtifactRecord(value: unknown): Result<ArtifactRecord> {
 
 export function isArtifactRecord(value: unknown): value is ArtifactRecord {
 	return parseArtifactRecord(value).ok
+}
+
+export function parseCreateArtifactMetadataInput(
+	value: unknown,
+): Result<CreateArtifactMetadataInput> {
+	const result = createArtifactMetadataInputSchema.safeParse(value)
+
+	if (!result.success) {
+		return err(validationError("Invalid create artifact metadata input.", result.error))
+	}
+
+	return ok(result.data)
+}
+
+export function isCreateArtifactMetadataInput(
+	value: unknown,
+): value is CreateArtifactMetadataInput {
+	return parseCreateArtifactMetadataInput(value).ok
+}
+
+export function parseCreateArtifactMetadataResult(
+	value: unknown,
+): Result<CreateArtifactMetadataResult> {
+	const result = createArtifactMetadataResultSchema.safeParse(value)
+
+	if (!result.success) {
+		return err(validationError("Invalid create artifact metadata result.", result.error))
+	}
+
+	return ok(result.data)
+}
+
+export function isCreateArtifactMetadataResult(
+	value: unknown,
+): value is CreateArtifactMetadataResult {
+	return parseCreateArtifactMetadataResult(value).ok
 }
 
 export function parseListRunArtifactsResult(value: unknown): Result<ListRunArtifactsResult> {

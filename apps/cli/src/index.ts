@@ -26,6 +26,10 @@ export type CliResult = {
 	readonly stdout: string
 }
 
+export type CliIo = {
+	readonly stderr?: (chunk: string) => void
+}
+
 type InitCommandOptions = {
 	readonly codex: boolean
 	readonly projectRoot?: string
@@ -49,8 +53,12 @@ export type InitializeSandoProjectOptions = {
 	readonly codexCommand?: string
 	readonly env?: NodeJS.ProcessEnv
 	readonly fetch?: typeof fetch
+	readonly hostedLoginPollIntervalMs?: number
+	readonly hostedLoginWaitTimeoutMs?: number
 	readonly mcpCommand?: readonly string[]
 	readonly now?: Date
+	readonly onLoginUrl?: (input: HostedLoginPrompt) => void
+	readonly openLoginUrl?: (url: string) => boolean | Promise<boolean>
 	readonly projectRoot?: string
 	readonly runCommand?: SyncCommandRunner
 }
@@ -61,7 +69,13 @@ export type InitializeSandoProjectResult = {
 	readonly policy: FileInitStatus
 	readonly project: FileInitStatus
 	readonly projectRoot: string
+	readonly login?: HostedLoginPrompt
 	readonly session?: FileInitStatus
+}
+
+export type HostedLoginPrompt = {
+	readonly opened: boolean
+	readonly url: string
 }
 
 export type FileInitStatus = {
@@ -89,6 +103,7 @@ export type CodexMcpInitStatus =
 export async function runCli(
 	argv: readonly string[] = process.argv.slice(2),
 	env: NodeJS.ProcessEnv = process.env,
+	io: CliIo = {},
 ): Promise<CliResult> {
 	const [command = "help", ...args] = argv
 
@@ -106,7 +121,7 @@ export async function runCli(
 		case "doctor":
 			return success(`${JSON.stringify(doctorReport(env), null, 2)}\n`)
 		case "init":
-			return await initCommand(args, env)
+			return await initCommand(args, env, io)
 		case "policy":
 			return policyCommand(args)
 		case "mcp":
@@ -116,7 +131,11 @@ export async function runCli(
 	}
 }
 
-async function initCommand(args: readonly string[], env: NodeJS.ProcessEnv): Promise<CliResult> {
+async function initCommand(
+	args: readonly string[],
+	env: NodeJS.ProcessEnv,
+	io: CliIo,
+): Promise<CliResult> {
 	if (args.includes("--help") || args.includes("-h")) {
 		return success(initHelpText())
 	}
@@ -131,6 +150,9 @@ async function initCommand(args: readonly string[], env: NodeJS.ProcessEnv): Pro
 		const result = await initializeSandoProject({
 			codex: parsed.value.codex,
 			env,
+			onLoginUrl: (prompt) => {
+				io.stderr?.(loginPromptText(prompt))
+			},
 			...(parsed.value.projectRoot === undefined ? {} : { projectRoot: parsed.value.projectRoot }),
 		})
 
@@ -209,7 +231,15 @@ export async function initializeSandoProject(
 			? await initializeHostedIdentity({
 					env,
 					fetch: options.fetch ?? fetch,
+					...(options.hostedLoginPollIntervalMs === undefined
+						? {}
+						: { pollIntervalMs: options.hostedLoginPollIntervalMs }),
+					...(options.hostedLoginWaitTimeoutMs === undefined
+						? {}
+						: { waitTimeoutMs: options.hostedLoginWaitTimeoutMs }),
 					now,
+					...(options.onLoginUrl === undefined ? {} : { onLoginUrl: options.onLoginUrl }),
+					openLoginUrl: options.openLoginUrl ?? openLoginUrlWithSystemBrowser,
 					projectRoot,
 				})
 			: undefined
@@ -245,6 +275,7 @@ export async function initializeSandoProject(
 		policy,
 		project,
 		projectRoot,
+		...(hosted?.login === undefined ? {} : { login: hosted.login }),
 		...(session === undefined ? {} : { session }),
 	}
 }
@@ -333,13 +364,35 @@ async function initializeHostedIdentity(input: {
 	readonly env: NodeJS.ProcessEnv
 	readonly fetch: typeof fetch
 	readonly now: Date
+	readonly onLoginUrl?: (input: HostedLoginPrompt) => void
+	readonly openLoginUrl: (url: string) => boolean | Promise<boolean>
+	readonly pollIntervalMs?: number
 	readonly projectRoot: string
+	readonly waitTimeoutMs?: number
 }): Promise<{
+	readonly login: HostedLoginPrompt
 	readonly projectConfig: Record<string, unknown>
 	readonly token: string
 }> {
 	const apiUrl = (input.env.SANDO_API_URL ?? "http://127.0.0.1:3000").replace(/\/+$/u, "")
-	const token = await signInAnonymously(apiUrl, input.fetch)
+	const hostedLogin = await startHostedLogin(apiUrl, input.fetch)
+	const prompt = {
+		url: hostedLogin.loginUrl,
+		opened: false,
+	}
+
+	input.onLoginUrl?.(prompt)
+
+	const login = {
+		url: hostedLogin.loginUrl,
+		opened: await tryOpenLoginUrl(input.openLoginUrl, hostedLogin.loginUrl),
+	}
+
+	const token = await waitForHostedLoginToken(input.fetch, {
+		pollUrl: hostedLogin.pollUrl,
+		...(input.pollIntervalMs === undefined ? {} : { pollIntervalMs: input.pollIntervalMs }),
+		...(input.waitTimeoutMs === undefined ? {} : { waitTimeoutMs: input.waitTimeoutMs }),
+	})
 	const headers = {
 		authorization: `Bearer ${token}`,
 		"content-type": "application/json",
@@ -377,6 +430,7 @@ async function initializeHostedIdentity(input: {
 	)
 
 	return {
+		login,
 		token,
 		projectConfig: {
 			apiUrl,
@@ -388,22 +442,68 @@ async function initializeHostedIdentity(input: {
 	}
 }
 
-async function signInAnonymously(apiUrl: string, fetchFn: typeof fetch): Promise<string> {
-	const response = await fetchFn(`${apiUrl}/api/auth/sign-in/anonymous`, {
+async function startHostedLogin(
+	apiUrl: string,
+	fetchFn: typeof fetch,
+): Promise<{ readonly loginUrl: string; readonly pollUrl: string }> {
+	const response = await fetchFn(`${apiUrl}/v1/login/start`, {
 		method: "POST",
 		headers: {
 			"content-type": "application/json",
 		},
-		body: "{}",
+		body: JSON.stringify({
+			client: "sando-cli",
+		}),
 	})
 	const body = await readHostedResponse(response)
-	const token = body.token
+	const loginUrl = body.loginUrl
+	const pollUrl = body.pollUrl
 
-	if (typeof token !== "string" || token.length === 0) {
-		throw new Error("Anonymous sign-in response did not include a session token.")
+	if (typeof loginUrl !== "string" || loginUrl.length === 0) {
+		throw new Error("Hosted login response did not include a login URL.")
 	}
 
-	return token
+	if (typeof pollUrl !== "string" || pollUrl.length === 0) {
+		throw new Error("Hosted login response did not include a poll URL.")
+	}
+
+	return { loginUrl, pollUrl }
+}
+
+async function waitForHostedLoginToken(
+	fetchFn: typeof fetch,
+	input: {
+		readonly pollIntervalMs?: number
+		readonly pollUrl: string
+		readonly waitTimeoutMs?: number
+	},
+): Promise<string> {
+	const startedAt = Date.now()
+	const pollIntervalMs = input.pollIntervalMs ?? 1000
+	const waitTimeoutMs = input.waitTimeoutMs ?? 10 * 60 * 1000
+
+	while (Date.now() - startedAt <= waitTimeoutMs) {
+		const response = await fetchFn(input.pollUrl)
+		const body = await readHostedResponse(response)
+
+		if (body.status === "completed") {
+			const token = body.token
+
+			if (typeof token === "string" && token.length > 0) {
+				return token
+			}
+
+			throw new Error("Hosted login completion did not include a session token.")
+		}
+
+		if (body.status !== "pending") {
+			throw new Error("Hosted login poll response had an unexpected status.")
+		}
+
+		await delay(pollIntervalMs)
+	}
+
+	throw new Error("Timed out waiting for hosted login.")
 }
 
 async function postHostedJson(
@@ -461,6 +561,69 @@ function defaultHostName(env: NodeJS.ProcessEnv): string {
 
 function hostFingerprint(env: NodeJS.ProcessEnv): string {
 	return `host:${env.WSL_DISTRO_NAME ?? "linux"}:${env.HOSTNAME ?? "unknown"}`
+}
+
+function loginPromptText(prompt: HostedLoginPrompt): string {
+	return [
+		prompt.opened
+			? "Opened the hosted sando login page in your browser."
+			: "Open this hosted sando login URL in your browser.",
+		`Login URL: ${prompt.url}`,
+		"",
+	].join("\n")
+}
+
+async function tryOpenLoginUrl(
+	openLoginUrl: (url: string) => boolean | Promise<boolean>,
+	url: string,
+): Promise<boolean> {
+	try {
+		return await openLoginUrl(url)
+	} catch {
+		return false
+	}
+}
+
+async function openLoginUrlWithSystemBrowser(url: string): Promise<boolean> {
+	const command = browserOpenCommand(url)
+
+	if (command === undefined) {
+		return false
+	}
+
+	const result = spawnSync(command.command, command.args, {
+		encoding: "utf8",
+	})
+
+	return result.status === 0
+}
+
+function browserOpenCommand(
+	url: string,
+): { readonly command: string; readonly args: readonly string[] } | undefined {
+	if (process.platform === "darwin") {
+		return { command: "open", args: [url] }
+	}
+
+	if (process.platform === "win32") {
+		return { command: "cmd.exe", args: ["/c", "start", "", url] }
+	}
+
+	if (process.env.WSL_DISTRO_NAME !== undefined || process.env.WSL_INTEROP !== undefined) {
+		return { command: "wslview", args: [url] }
+	}
+
+	if (process.platform === "linux") {
+		return { command: "xdg-open", args: [url] }
+	}
+
+	return undefined
+}
+
+async function delay(ms: number): Promise<void> {
+	await new Promise<void>((resolvePromise) => {
+		setTimeout(resolvePromise, ms)
+	})
 }
 
 export function upsertAgentsFile(path: string): FileInitStatus {
@@ -816,7 +979,11 @@ export async function main(): Promise<void> {
 		return
 	}
 
-	const result = await runCli()
+	const result = await runCli(argv, process.env, {
+		stderr: (chunk) => {
+			process.stderr.write(chunk)
+		},
+	})
 
 	process.stdout.write(result.stdout)
 	process.stderr.write(result.stderr)

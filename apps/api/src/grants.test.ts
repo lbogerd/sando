@@ -12,7 +12,7 @@ const requestedAt = new Date("2026-06-14T17:30:00.000Z")
 const approvedAt = new Date("2026-06-14T17:31:00.000Z")
 const expiredAt = new Date("2026-06-14T18:02:00.000Z")
 
-describe("grant API routes", () => {
+describe("internal grant domain routes", () => {
 	it("creates a hosted approval flow for the first Codex run", async () => {
 		const audit = recordingAuditRepository()
 		const app = createHostedApp({

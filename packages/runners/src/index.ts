@@ -19,6 +19,8 @@ import { z } from "zod"
 
 import {
 	type AgentId,
+	type ArtifactRef,
+	type ArtifactRecord,
 	type AppendAuditEventResult,
 	type AuthorizeGrantInput,
 	type AuthorizeGrantResult,
@@ -29,6 +31,7 @@ import {
 	type JsonValue,
 	parseAppendAuditEventResult,
 	parseAuthorizeGrantResult,
+	parseCreateArtifactMetadataResult,
 	parseCreateRunResult,
 	parseFinishRunResult,
 	parseGrantRecord,
@@ -205,6 +208,15 @@ export type FinishHostedRunInput = {
 	readonly status: RunProjectCommandResult["status"]
 }
 
+export type RegisterHostedArtifactsInput = {
+	readonly artifacts: readonly ArtifactRef[]
+	readonly runId: RunId
+}
+
+export type RegisterHostedArtifactsResult = {
+	readonly artifacts: readonly ArtifactRecord[]
+}
+
 export type AgentAuthority = {
 	readonly appendAuditEvent?: (input: {
 		readonly grantId?: string
@@ -217,9 +229,12 @@ export type AgentAuthority = {
 		input: CapabilityExecutionRequest,
 	) => Promise<Result<AuthorizedCapability>>
 	readonly finishRun?: (input: FinishHostedRunInput) => Promise<Result<FinishRunResult>>
+	readonly registerArtifacts?: (
+		input: RegisterHostedArtifactsInput,
+	) => Promise<Result<RegisterHostedArtifactsResult>>
 }
 
-export type HostedAgentAuthorityOptions = {
+export type BetterAuthAgentAuthorityOptions = {
 	readonly agentId: AgentId
 	readonly apiUrl: string
 	readonly fetch?: typeof fetch
@@ -230,6 +245,8 @@ export type HostedAgentAuthorityOptions = {
 	readonly token: string
 	readonly waitTimeoutMs?: number
 }
+
+export type HostedAgentAuthorityOptions = BetterAuthAgentAuthorityOptions
 
 export type HostedAgentAuthorityEnvironment = {
 	readonly SANDO_AGENT_ID?: string
@@ -313,7 +330,7 @@ export const defaultNodeTsTemplatePolicyConstraints = {
 	},
 } satisfies PolicyConstraints
 
-export class HostedAgentAuthority implements AgentAuthority {
+export class BetterAuthAgentAuthority implements AgentAuthority {
 	readonly #apiUrl: string
 	readonly #context: Pick<RequestGrantInput, "agentId" | "hostId" | "projectId">
 	readonly #fetch: typeof fetch
@@ -322,7 +339,7 @@ export class HostedAgentAuthority implements AgentAuthority {
 	readonly #token: string
 	readonly #waitTimeoutMs: number
 
-	constructor(options: HostedAgentAuthorityOptions) {
+	constructor(options: BetterAuthAgentAuthorityOptions) {
 		this.#apiUrl = options.apiUrl.replace(/\/+$/u, "")
 		this.#context = {
 			agentId: options.agentId,
@@ -462,6 +479,36 @@ export class HostedAgentAuthority implements AgentAuthority {
 		)
 	}
 
+	async registerArtifacts(
+		input: RegisterHostedArtifactsInput,
+	): Promise<Result<RegisterHostedArtifactsResult>> {
+		const artifacts: ArtifactRecord[] = []
+
+		for (const artifact of input.artifacts) {
+			const registered = await this.#postJson(
+				`/v1/runs/${encodeURIComponent(input.runId)}/artifacts`,
+				{
+					projectId: this.#context.projectId,
+					name: artifact.name,
+					uri: artifact.uri,
+					path: artifact.uri,
+					...(artifact.contentType === undefined ? {} : { contentType: artifact.contentType }),
+					...(artifact.sizeBytes === undefined ? {} : { sizeBytes: artifact.sizeBytes }),
+					private: true,
+				},
+				parseCreateArtifactMetadataResult,
+			)
+
+			if (!registered.ok) {
+				return registered
+			}
+
+			artifacts.push(registered.value.artifact)
+		}
+
+		return ok({ artifacts })
+	}
+
 	async #requestGrant(input: RequestGrantInput): Promise<Result<RequestGrantResult>> {
 		return this.#postJson("/v1/grants/request", input, parseRequestGrantResult)
 	}
@@ -552,7 +599,7 @@ export function createHostedAgentAuthorityFromEnv(
 		return undefined
 	}
 
-	return new HostedAgentAuthority({
+	return new BetterAuthAgentAuthority({
 		apiUrl: env.SANDO_API_URL,
 		token: env.SANDO_SESSION_TOKEN,
 		projectId: asId("project", env.SANDO_PROJECT_ID),
@@ -565,6 +612,8 @@ export function createHostedAgentAuthorityFromEnv(
 			: {}),
 	})
 }
+
+export { BetterAuthAgentAuthority as HostedAgentAuthority }
 
 export async function findProjectRoot(
 	input: FindProjectRootInput = {},
@@ -947,6 +996,18 @@ export async function runProjectCommand(
 
 	if (finish !== undefined && !finish.ok) {
 		return finish
+	}
+
+	const registeredArtifacts =
+		result.ok && authority.registerArtifacts !== undefined
+			? await authority.registerArtifacts({
+					runId,
+					artifacts: result.value.artifacts,
+				})
+			: undefined
+
+	if (registeredArtifacts !== undefined && !registeredArtifacts.ok) {
+		return registeredArtifacts
 	}
 
 	return result

@@ -110,6 +110,7 @@ describe("sando CLI", () => {
 					HOSTNAME: "host-a",
 				},
 				fetch: fakeHostedFetch(),
+				openLoginUrl: () => true,
 				now: new Date("2026-06-15T12:00:00.000Z"),
 				projectRoot: root,
 				runCommand: (command, args, options) => {
@@ -140,6 +141,10 @@ describe("sando CLI", () => {
 					command: "codex",
 					args: ["mcp", "add", "sando", "--", "sando", "mcp", "--project-root", root],
 					status: "configured",
+				},
+				login: {
+					opened: true,
+					url: "https://api.example.test/v1/login/login_123",
 				},
 			})
 			expect(calls).toEqual([
@@ -188,6 +193,7 @@ describe("sando CLI", () => {
 					SANDO_API_URL: "https://api.example.test",
 				},
 				fetch: fakeHostedFetch(),
+				openLoginUrl: () => false,
 				projectRoot: root,
 				runCommand: () => ({
 					error: Object.assign(new Error("spawn codex ENOENT"), { code: "ENOENT" }),
@@ -209,19 +215,88 @@ describe("sando CLI", () => {
 			rmSync(root, { recursive: true, force: true })
 		}
 	})
+
+	it("reports the hosted login fallback URL while init waits", async () => {
+		const root = mkdtempSync(join(tmpdir(), "sando-cli-init-"))
+		const prompts: string[] = []
+
+		try {
+			const result = await initializeSandoProject({
+				codex: true,
+				env: {
+					SANDO_API_URL: "https://api.example.test",
+					SANDO_CODEX_BIN: "missing-codex-for-test",
+				},
+				fetch: fakeHostedFetch(),
+				onLoginUrl: (prompt) => {
+					prompts.push(prompt.url)
+				},
+				openLoginUrl: () => false,
+				projectRoot: root,
+			})
+
+			expect(result.login).toEqual({
+				opened: false,
+				url: "https://api.example.test/v1/login/login_123",
+			})
+			expect(prompts).toEqual(["https://api.example.test/v1/login/login_123"])
+		} finally {
+			rmSync(root, { recursive: true, force: true })
+		}
+	})
+
+	it("fails init when hosted login polling times out", async () => {
+		const root = mkdtempSync(join(tmpdir(), "sando-cli-init-"))
+
+		try {
+			await expect(
+				initializeSandoProject({
+					codex: true,
+					env: {
+						SANDO_API_URL: "https://api.example.test",
+					},
+					fetch: fakeHostedFetch({ loginCompletes: false }),
+					hostedLoginPollIntervalMs: 0,
+					hostedLoginWaitTimeoutMs: 0,
+					openLoginUrl: () => false,
+					projectRoot: root,
+				}),
+			).rejects.toThrow("Timed out waiting for hosted login.")
+		} finally {
+			rmSync(root, { recursive: true, force: true })
+		}
+	})
 })
 
-function fakeHostedFetch(): typeof fetch {
+function fakeHostedFetch(options: { readonly loginCompletes?: boolean } = {}): typeof fetch {
+	const loginCompletes = options.loginCompletes ?? true
+
 	return async (url, init) => {
 		const path = new URL(String(url)).pathname
 		const body = init?.body === undefined ? undefined : JSON.parse(String(init.body))
 
-		if (path === "/api/auth/sign-in/anonymous") {
+		if (path === "/v1/login/start") {
 			return Response.json({
-				token: "session_123",
-				user: {
-					id: "user_123",
+				login: {
+					id: "login_123",
+					status: "pending",
+					createdAt: "2026-06-15T12:00:00.000Z",
+					expiresAt: "2026-06-15T12:10:00.000Z",
 				},
+				loginUrl: "https://api.example.test/v1/login/login_123",
+				pollUrl: "https://api.example.test/v1/login/login_123/token",
+			})
+		}
+
+		if (path === "/v1/login/login_123/token") {
+			if (!loginCompletes) {
+				return Response.json({ status: "pending" }, { status: 202 })
+			}
+
+			return Response.json({
+				status: "completed",
+				token: "session_123",
+				user: { id: "user_123" },
 			})
 		}
 

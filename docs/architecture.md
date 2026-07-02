@@ -40,7 +40,8 @@ inspection.
 - `packages/runners`: orchestration layer for policy loading, workspace
   archiving, runtime calls, local artifact capture, and reporting.
 - `packages/templates`: runtime templates, currently `node-ts`.
-- `packages/auth`: Better Auth scaffolding and future Agent Auth integration.
+- `packages/auth`: Better Auth configuration for hosted email/password, bearer,
+  and legacy anonymous sessions.
 - `packages/db`: target hosted metadata schema. DB-backed repositories are
   deferred for the MVP demo.
 

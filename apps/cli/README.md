@@ -37,8 +37,9 @@ local token commands.
 
 ## Init
 
-`sando init --codex` currently creates local project files and configures Codex
-MCP when the Codex CLI is available:
+`sando init --codex` starts a hosted login ticket, opens or prints the login
+URL, polls for a Better Auth bearer session, creates local project files, and
+configures Codex MCP when the Codex CLI is available:
 
 ```bash
 sando init --codex
@@ -48,15 +49,17 @@ Created or updated files:
 
 - `.sando/project.json`
 - `.sando/policy.json`
+- `.sando/session.json`
 - `AGENTS.md`
+
+The hosted API registers project, local host, and Codex agent identities before
+the MCP config is written.
 
 The command also runs:
 
 ```bash
 codex mcp add sando -- sando mcp --project-root <project-root>
 ```
-
-Interactive hosted login and project/host/agent registration are Todo.
 
 ## MCP
 

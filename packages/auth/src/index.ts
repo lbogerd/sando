@@ -31,6 +31,10 @@ export function createSandoAuthOptions(input: SandoAuthOptions): BetterAuthOptio
 		...(input.secret === undefined ? {} : { secret: input.secret }),
 		...(input.baseURL === undefined ? {} : { baseURL: input.baseURL }),
 		...(input.trustedOrigins === undefined ? {} : { trustedOrigins: [...input.trustedOrigins] }),
+		emailAndPassword: {
+			enabled: true,
+			requireEmailVerification: false,
+		},
 		plugins: [anonymous(), bearer()],
 	}
 }

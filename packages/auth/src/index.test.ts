@@ -9,7 +9,7 @@ import {
 } from "./index.js"
 
 describe("sando auth configuration", () => {
-	it("enables Better Auth anonymous sessions with bearer auth", () => {
+	it("enables Better Auth email login with bearer auth", () => {
 		const database = {} as AuthDatabase
 
 		const options = createSandoAuthOptions({
@@ -30,7 +30,10 @@ describe("sando auth configuration", () => {
 		const plugins = options.plugins ?? []
 
 		expect(plugins.map((plugin) => plugin.id)).toEqual(["anonymous", "bearer"])
-		expect(options).not.toHaveProperty("emailAndPassword")
+		expect(options.emailAndPassword).toEqual({
+			enabled: true,
+			requireEmailVerification: false,
+		})
 	})
 
 	it("reads hosted auth options from environment values", () => {

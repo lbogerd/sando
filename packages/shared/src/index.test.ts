@@ -15,6 +15,8 @@ import {
 	isArtifactRecord,
 	isAuthorizeGrantInput,
 	isAuthorizeGrantResult,
+	isCreateArtifactMetadataInput,
+	isCreateArtifactMetadataResult,
 	isGrantRecord,
 	hostPlatforms,
 	isCreateRunInput,
@@ -43,6 +45,8 @@ import {
 	parseAppendAuditEventResult,
 	parseAuditEventRecord,
 	parseArtifactRecord,
+	parseCreateArtifactMetadataInput,
+	parseCreateArtifactMetadataResult,
 	parseCreateRunInput,
 	parseCreateRunResult,
 	parseFinishRunInput,
@@ -384,6 +388,7 @@ describe("artifact metadata schemas", () => {
 			runId: "run_123",
 			projectId: "proj_123",
 			name: "changed-files.txt",
+			uri: "sando://artifacts/art_123",
 			path: "/artifacts/changed-files.txt",
 			contentType: "text/plain",
 			sizeBytes: 128,
@@ -400,12 +405,39 @@ describe("artifact metadata schemas", () => {
 		expect(isListRunArtifactsResult(result)).toBe(true)
 	})
 
+	it("accepts valid artifact metadata create inputs and results", () => {
+		const input = {
+			runId: "run_123",
+			projectId: "proj_123",
+			name: "logs.txt",
+			uri: "sando://artifacts/art_logs",
+			path: "sando://artifacts/art_logs",
+			contentType: "text/plain",
+			sizeBytes: 5,
+			private: true,
+			retentionExpiresAt: "2026-07-14T18:00:00.000Z",
+		}
+		const artifact = {
+			id: "art_logs",
+			storageKey: "sando://artifacts/art_logs",
+			createdAt: "2026-06-14T18:00:00.000Z",
+			...input,
+		}
+		const result = { artifact }
+
+		expect(parseCreateArtifactMetadataInput(input)).toEqual({ ok: true, value: input })
+		expect(isCreateArtifactMetadataInput(input)).toBe(true)
+		expect(parseCreateArtifactMetadataResult(result)).toEqual({ ok: true, value: result })
+		expect(isCreateArtifactMetadataResult(result)).toBe(true)
+	})
+
 	it("rejects invalid artifact records", () => {
 		const result = parseArtifactRecord({
 			id: "run_123",
 			runId: "proj_123",
 			projectId: "host_123",
 			name: "",
+			uri: "http://example.test/artifact",
 			path: "",
 			contentType: "",
 			sizeBytes: -1,
@@ -424,6 +456,7 @@ describe("artifact metadata schemas", () => {
 					{ path: "$.runId", message: "Expected a run ID." },
 					{ path: "$.projectId", message: "Expected a project ID." },
 					{ path: "$.name", message: "Expected a non-empty string." },
+					{ path: "$.uri", message: "Expected a sando URI." },
 					{ path: "$.path", message: "Expected a non-empty string." },
 					{ path: "$.contentType", message: "Expected a non-empty string." },
 					{ path: "$.sizeBytes", message: "Expected a non-negative integer." },

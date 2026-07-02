@@ -87,10 +87,12 @@ The current `sando init --codex` implementation creates:
 - `.sando/project.json`;
 - `.sando/policy.json`;
 - an AGENTS.md Sando section;
+- `.sando/session.json` after the hosted login ticket completes;
+- hosted project, host, and Codex agent identity records;
 - a Codex MCP config entry when `codex mcp add` is available.
 
-Interactive hosted login and project/host/agent registration are Todo. They are
-the next implementation batch for the MVP demo.
+The CLI opens the hosted login URL when possible and prints the URL as a
+fallback before polling for the Better Auth bearer session.
 
 ## Local Hosted API
 
@@ -111,8 +113,9 @@ SANDO_DEV_AUTH_TOKEN=sando-dev-token
 SANDO_DEV_USER_ID=user_dev
 ```
 
-Use `Authorization: Bearer sando-dev-token` for authenticated API calls against
-the in-memory development routes.
+When Better Auth is configured through `DATABASE_URL`, authenticated API calls
+should use the bearer session returned by hosted login. The dev token resolver is
+only used when the API is started without a Better Auth instance.
 
 The hosted API still uses in-memory repositories by default. The local database
 is available for auth and persistence wiring once those adapters are added.

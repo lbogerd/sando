@@ -10,7 +10,7 @@ import { z } from "zod"
 import {
 	compileEffectivePolicy,
 	createHostedAgentAuthorityFromEnv,
-	HostedAgentAuthority,
+	BetterAuthAgentAuthority,
 	loadProjectPolicy,
 	readRunArtifact,
 	readRunDiff,
@@ -167,7 +167,7 @@ export function createSandoMcpService(options: CreateSandoMcpServiceOptions = {}
 
 function createHostedAgentAuthorityFromProjectConfig(
 	projectRoot: string | undefined,
-): HostedAgentAuthority | undefined {
+): BetterAuthAgentAuthority | undefined {
 	if (projectRoot === undefined) {
 		return undefined
 	}
@@ -196,7 +196,7 @@ function createHostedAgentAuthorityFromProjectConfig(
 		return undefined
 	}
 
-	return new HostedAgentAuthority({
+	return new BetterAuthAgentAuthority({
 		apiUrl,
 		token,
 		projectId: asId("project", projectId),

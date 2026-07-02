@@ -34,6 +34,11 @@ import {
 import { createGrantRoutes, createMemoryGrantRepository, type GrantRepository } from "./grants.js"
 import { createHostRoutes, createMemoryHostRepository, type HostRepository } from "./hosts.js"
 import {
+	createHostedLoginRoutes,
+	createMemoryHostedLoginRepository,
+	type HostedLoginRepository,
+} from "./login.js"
+import {
 	createMemoryProjectRepository,
 	createProjectRoutes,
 	type ProjectRepository,
@@ -43,8 +48,14 @@ import { createMemoryRunRepository, createRunRoutes, type RunRepository } from "
 export const apiServiceName = "sando-api"
 export const apiVersion = "v1"
 
+type HostedAuthApi = {
+	readonly getSession?: SandoAuth["api"]["getSession"]
+	readonly signInEmail?: unknown
+	readonly signUpEmail?: unknown
+}
+
 export type HostedAppOptions = {
-	readonly auth?: Pick<SandoAuth, "handler"> & Partial<Pick<SandoAuth, "api">>
+	readonly auth?: Pick<SandoAuth, "handler"> & { readonly api?: HostedAuthApi }
 	readonly agentRepository?: AgentRepository
 	readonly now?: () => Date
 	readonly auditEventRepository?: AuditEventRepository
@@ -52,6 +63,7 @@ export type HostedAppOptions = {
 	readonly currentUser?: CurrentUserResolver
 	readonly grantRepository?: GrantRepository
 	readonly hostRepository?: HostRepository
+	readonly loginRepository?: HostedLoginRepository
 	readonly projectRepository?: ProjectRepository
 	readonly runRepository?: RunRepository
 }
@@ -66,13 +78,15 @@ export function createHostedApp(options: HostedAppOptions = {}): Hono {
 	const agentRepository = options.agentRepository ?? createMemoryAgentRepository()
 	const auditEventRepository = options.auditEventRepository ?? createMemoryAuditEventRepository()
 	const artifactRepository = options.artifactRepository ?? createMemoryArtifactRepository()
+	const authApi = options.auth?.api
 	const currentUser =
 		options.currentUser ??
-		(options.auth?.api === undefined
+		(authApi?.getSession === undefined
 			? currentUserResolverFromEnv()
-			: createBetterAuthCurrentUserResolver({ api: options.auth.api }))
+			: createBetterAuthCurrentUserResolver({ api: { getSession: authApi.getSession } }))
 	const grantRepository = options.grantRepository ?? createMemoryGrantRepository()
 	const hostRepository = options.hostRepository ?? createMemoryHostRepository()
+	const loginRepository = options.loginRepository ?? createMemoryHostedLoginRepository()
 	const projectRepository = options.projectRepository ?? createMemoryProjectRepository()
 	const runRepository = options.runRepository ?? createMemoryRunRepository()
 	const app = new Hono()
@@ -130,6 +144,14 @@ export function createHostedApp(options: HostedAppOptions = {}): Hono {
 
 	v1.route(
 		"/",
+		createHostedLoginRoutes({
+			...(authApi === undefined ? {} : { auth: authApi }),
+			loginRepository,
+			now,
+		}),
+	)
+	v1.route(
+		"/",
 		createProjectRoutes({
 			auditEventRepository,
 			currentUser,
@@ -184,8 +206,10 @@ export function createHostedApp(options: HostedAppOptions = {}): Hono {
 	v1.route(
 		"/",
 		createArtifactRoutes({
+			auditEventRepository,
 			artifactRepository,
 			currentUser,
+			now,
 		}),
 	)
 
@@ -239,6 +263,7 @@ export function serveHostedApp(options: HostedServerOptions = {}): ServerType {
 		...(options.currentUser === undefined ? {} : { currentUser: options.currentUser }),
 		...(options.grantRepository === undefined ? {} : { grantRepository: options.grantRepository }),
 		...(options.hostRepository === undefined ? {} : { hostRepository: options.hostRepository }),
+		...(options.loginRepository === undefined ? {} : { loginRepository: options.loginRepository }),
 		...(options.projectRepository === undefined
 			? {}
 			: { projectRepository: options.projectRepository }),
