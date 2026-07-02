@@ -12,18 +12,23 @@
 - [x] Keep `pnpm local:doctor` and `pnpm local:smoke` as dev verification.
 - [x] Run repo checks after cleanup.
 [ ] Implementation batch
-- [ ] Add interactive hosted login to `sando init --codex`.
-- [ ] Register project identity during init.
-- [ ] Register local host identity during init.
-- [ ] Register Codex agent identity during init.
-- [ ] Persist init identity/config needed by the local MCP server.
-- [ ] Implement the Better Auth Agent Auth adapter.
-- [ ] Require Agent Auth for `sando_run_project_command`.
+- [x] Add hosted sign-in to `sando init --codex`.
+- [ ] Replace anonymous init sign-in with the intended interactive hosted login UX.
+- [x] Register project identity during init.
+- [x] Register local host identity during init.
+- [x] Register Codex agent identity during init.
+- [x] Persist init identity/config needed by the local MCP server.
+- [x] Load persisted hosted identity/config when the local MCP server starts.
+- [ ] Implement the Better Auth Agent Auth adapter and make it the final auth boundary.
+- [x] Require hosted authorization for `sando_run_project_command`.
+- [x] Request and authorize a hosted grant before local execution.
 - [ ] Remove or demote custom grant scaffolding once real Agent Auth covers the flow.
-- [ ] Create hosted run metadata before local execution.
-- [ ] Finish hosted run metadata after local execution.
-- [ ] Append hosted audit events for grant and run lifecycle.
-- [ ] Return a hosted audit ref in the MCP command result.
+- [x] Create hosted run metadata before local execution.
+- [x] Finish hosted run metadata after local execution.
+- [x] Append hosted audit events for grant and run lifecycle.
+- [x] Return a hosted audit ref in the MCP command result.
+- [ ] Wire artifact metadata for returned local refs into hosted metadata.
+- [ ] Validate the full fresh-project demo from `sando init --codex` through Codex MCP approval and execution.
 [ ] Later
 - [ ] Wire DB-backed repositories for hosted metadata.
 - [ ] Add private hosted artifact payload storage.

@@ -19,67 +19,81 @@ The current target is an honest **MVP demo**, not a complete hosted product. The
 demo should prove the low-friction in-agent flow:
 
 1. A developer runs `sando init --codex`.
-2. Sando performs interactive hosted login and registers the project, local
-   host, and Codex agent.
+2. Sando performs hosted login and registers the project, local host, and Codex
+   agent.
 3. Sando configures Codex MCP with enough identity for the local MCP server.
 4. Codex calls `sando_run_project_command`.
-5. Sando requires real Agent Auth approval.
+5. Sando requires hosted authorization before execution.
 6. Sando runs the command through local Podman isolation.
 7. Sando returns local artifact refs plus hosted run metadata and audit events.
+
+Current code implements this flow with Better Auth anonymous sessions plus the
+hosted grant scaffolding. The remaining auth milestone is to replace that
+scaffolding with the final Agent Auth adapter and interactive hosted login
+experience.
 
 Correctness is preferred over compatibility. Removed prototype surfaces should
 not remain as aliases or fallback paths.
 
 ## Golden Path Status
 
-| Step                                                                                                | Status      | Notes                                                                                                                    |
-| --------------------------------------------------------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `sando init --codex` creates local project config, policy, AGENTS.md guidance, and Codex MCP config | In Progress | File creation and `codex mcp add` wiring exist. Interactive login and hosted registration are Todo.                      |
-| Interactive hosted login during init                                                                | Todo        | Replaces manual local token storage.                                                                                     |
-| Project, host, and Codex agent registration during init                                             | Todo        | Registration APIs and schemas exist, but init does not call them yet.                                                    |
-| Codex MCP server exposes Sando tools                                                                | Done        | The stdio MCP server and tool contracts exist.                                                                           |
-| `sando_run_project_command` is the command execution entrypoint                                     | In Progress | Tool exists and can run locally. It still needs real Agent Auth enforcement as the required path.                        |
-| Real Agent Auth approval                                                                            | Todo        | Current grant scaffolding is useful domain work, but is not the final auth boundary.                                     |
-| Local Podman execution                                                                              | Done        | Runtime, runner, node-ts template, logs, diff, artifact capture, and local smoke verification exist.                     |
-| Local artifact refs for MVP demo                                                                    | Done        | Local `.sando/runs` outputs and `sando://` refs are sufficient for the demo.                                             |
-| Hosted run metadata and audit                                                                       | Todo        | Required for the demo, but DB-backed durability is not required initially. In-memory hosted repositories are acceptable. |
-| DB-backed persistence                                                                               | Deferred    | Schema exists as target design; repository wiring can wait until after the demo proves the flow.                         |
+| Step                                                                                                                         | Status      | Notes                                                                                                                                                                 |
+| ---------------------------------------------------------------------------------------------------------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sando init --codex` creates local project config, policy, AGENTS.md guidance, hosted identity/session, and Codex MCP config | In Progress | Local files, anonymous hosted sign-in, project/host/agent registration, session persistence, and `codex mcp add` wiring exist. Interactive login remains Todo.        |
+| Interactive hosted login during init                                                                                         | Todo        | Current init uses Better Auth anonymous sign-in. The target UX should authenticate the developer intentionally.                                                       |
+| Project, host, and Codex agent registration during init                                                                      | Done        | Init calls the hosted registration APIs and persists returned IDs in `.sando/project.json`.                                                                           |
+| Codex MCP server exposes Sando tools                                                                                         | Done        | The stdio MCP server and tool contracts exist.                                                                                                                        |
+| MCP server starts with hosted identity                                                                                       | Done        | The MCP service can load authority from environment variables or persisted `.sando/project.json` and `.sando/session.json`.                                           |
+| `sando_run_project_command` is the command execution entrypoint                                                              | In Progress | Tool exists and refuses to run without hosted authorization. Final Agent Auth adapter work remains.                                                                   |
+| Hosted grant approval                                                                                                        | In Progress | Current hosted grant scaffolding requests approval, opens the approval URL, polls for a decision, and authorizes grants. It is not yet the final Agent Auth boundary. |
+| Local Podman execution                                                                                                       | Done        | Runtime, runner, node-ts template, logs, diff, artifact capture, and local smoke verification exist.                                                                  |
+| Local artifact refs for MVP demo                                                                                             | Done        | Local `.sando/runs` outputs and `sando://` refs are sufficient for the demo.                                                                                          |
+| Hosted run metadata and audit                                                                                                | In Progress | Run create/finish and command/grant audit events exist. Hosted artifact metadata for returned refs still needs wiring.                                                |
+| DB-backed persistence                                                                                                        | Deferred    | Schema exists as target design; repository wiring can wait until after the demo proves the flow.                                                                      |
 
 ## Current Component Status
 
-| Component                                     | Status                   | Target                                                                                                                                                 |
-| --------------------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `apps/cli`                                    | In Progress              | Keep `help`, `version`, `status`, `doctor`, `init --codex`, `policy defaults`, and `mcp`. Add interactive init login and registration.                 |
-| CLI direct execution                          | Removed                  | No direct CLI fallback for the MVP demo. Commands should enter through MCP.                                                                            |
-| Manual CLI auth commands and standalone login | Removed                  | Auth should be part of `sando init --codex`, not a standalone token workflow.                                                                          |
-| `apps/mcp`                                    | In Progress              | Keep MCP tools. Require Agent Auth and hosted run/audit metadata before command execution is considered demo-ready.                                    |
-| `packages/runners`                            | Done for local execution | Keep local Podman orchestration and artifact capture. Wire hosted authority, run lifecycle, and audit as required behavior.                            |
-| `packages/runtimes`                           | Done for Podman          | Docker and Kubernetes remain schema values, not implemented runtime paths.                                                                             |
-| `packages/templates`                          | Done for `node-ts`       | Keep one node-ts runtime template. Browser/Playwright support is deferred.                                                                             |
-| `apps/api`                                    | In Progress              | Keep Hono API, Better Auth mount, registration/run/audit/artifact routes, and in-memory repositories. Add real Agent Auth and required run/audit flow. |
-| `packages/auth`                               | In Progress              | Better Auth scaffolding exists. Agent Auth adapter is Todo.                                                                                            |
-| `packages/db`                                 | Done as target schema    | Keep schema definitions. DB-backed repositories are deferred for the MVP demo.                                                                         |
-| Hosted dashboard app                          | Removed                  | No dashboard or separate web app in the MVP demo. Approval/login can live in hosted API routes for now.                                                |
+| Component                                     | Status                | Target                                                                                                                                                                                     |
+| --------------------------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `apps/cli`                                    | In Progress           | Keep `help`, `version`, `status`, `doctor`, `init --codex`, `policy defaults`, and `mcp`. Init now performs anonymous hosted sign-in and registration; add the final interactive login UX. |
+| CLI direct execution                          | Removed               | No direct CLI fallback for the MVP demo. Commands should enter through MCP.                                                                                                                |
+| Manual CLI auth commands and standalone login | Removed               | Auth should be part of `sando init --codex`, not a standalone token workflow.                                                                                                              |
+| `apps/mcp`                                    | In Progress           | Keep MCP tools. The service can load hosted authority from env or project config and routes command execution through the runner.                                                          |
+| `packages/runners`                            | In Progress           | Local Podman orchestration, authority checks, hosted grants, run lifecycle, audit refs, and artifact capture exist. Final Agent Auth semantics and hosted artifact metadata remain.        |
+| `packages/runtimes`                           | Done for Podman       | Docker and Kubernetes remain schema values, not implemented runtime paths.                                                                                                                 |
+| `packages/templates`                          | Done for `node-ts`    | Keep one node-ts runtime template. Browser/Playwright support is deferred.                                                                                                                 |
+| `apps/api`                                    | In Progress           | Keep Hono API, Better Auth mount, registration/grant/run/audit/artifact routes, and in-memory repositories. Add the real Agent Auth adapter and artifact metadata wiring.                  |
+| `packages/auth`                               | In Progress           | Better Auth scaffolding exists. Agent Auth adapter is Todo.                                                                                                                                |
+| `packages/db`                                 | Done as target schema | Keep schema definitions. DB-backed repositories are deferred for the MVP demo.                                                                                                             |
+| Hosted dashboard app                          | Removed               | No dashboard or separate web app in the MVP demo. Approval/login can live in hosted API routes for now.                                                                                    |
 
 ## Auth And Authorization
 
-The MVP demo must require Agent Auth for agent-initiated command execution.
-Manual token saving is not part of the supported flow.
+The MVP demo must require hosted authorization for agent-initiated command
+execution. Manual token saving is not part of the supported flow.
 
 Current useful scaffolding:
 
 - Better Auth package and hosted auth route mount.
 - Agent configuration discovery metadata.
-- Grant request, approval, authorization shapes, and audit vocabulary.
-- Hosted routes and in-memory repositories that model grants and run metadata.
+- Anonymous init sign-in with bearer session support.
+- Project, host, and agent registration from `sando init --codex`.
+- Persisted project identity and session files consumed by the MCP server.
+- Grant request, browser approval, polling, authorization, and audit vocabulary.
+- Hosted routes and in-memory repositories that model grants, runs, artifacts,
+  and audit events.
 
 Required next behavior:
 
-- `sando init --codex` starts hosted login.
-- Init registers a project, host, and Codex agent identity.
-- The MCP server starts with the registered identity.
-- `sando_run_project_command` cannot execute without a valid Agent Auth grant.
-- Approval decisions are recorded as hosted audit events.
+- `sando init --codex` should use the intended interactive hosted login UX
+  instead of anonymous sign-in.
+- The final Better Auth Agent Auth adapter should become the supported auth
+  boundary.
+- Custom grant scaffolding should be removed or demoted once the Agent Auth
+  adapter covers the same behavior.
+- Hosted artifact metadata should be recorded for returned local refs.
+- The fresh-project flow should be validated end to end from init through Codex
+  MCP approval and execution.
 
 The custom grant flow may remain as internal domain scaffolding while real Agent
 Auth is added. It should not be documented as the MVP auth boundary.
@@ -110,9 +124,9 @@ Browser and Playwright artifacts are deferred.
 
 ## Hosted Metadata And Audit
 
-Hosted run metadata and audit are required for the MVP demo even when stored in
-memory. The demo should show that the hosted control plane receives the command
-lifecycle, not merely that a local process ran.
+Hosted run metadata and audit are implemented enough for the current demo path
+when stored in memory. The demo should show that the hosted control plane
+receives the command lifecycle, not merely that a local process ran.
 
 Minimum required hosted records:
 
@@ -122,7 +136,8 @@ Minimum required hosted records:
 - command started and command finished events;
 - artifact metadata for returned local refs when available.
 
-DB durability can follow after this flow works end to end.
+The remaining hosted metadata gap is artifact metadata for local refs. DB
+durability can follow after this flow works end to end.
 
 ## Supported CLI Surface
 
@@ -175,7 +190,7 @@ The MVP demo is ready when:
    identity.
 3. Codex can discover the Sando MCP server and call
    `sando_run_project_command`.
-4. The command requires Agent Auth approval.
+4. The command requires hosted approval through the supported auth boundary.
 5. Approved commands run in the local Podman runtime.
 6. Denied, expired, or mismatched grants prevent execution.
 7. The MCP result includes logs, diff, changed files, local artifact refs, and a
