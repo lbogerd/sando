@@ -843,6 +843,10 @@ export async function selectArchiveFiles(
 			throw error
 		}
 
+		if (isNotGitRepositoryError(error)) {
+			return selectArchiveFilesFromDirectory(projectRoot.value)
+		}
+
 		return err(
 			sandoError({
 				code: "COMMAND_FAILED",
@@ -857,6 +861,83 @@ export async function selectArchiveFiles(
 			}),
 		)
 	}
+}
+
+async function selectArchiveFilesFromDirectory(
+	projectRoot: string,
+): Promise<Result<ArchiveFileSelection>> {
+	const excludePatterns = await archiveExcludePatternsForProjectRoot(projectRoot)
+
+	if (!excludePatterns.ok) {
+		return excludePatterns
+	}
+
+	const files = await listDirectoryArchiveFiles(projectRoot, "", excludePatterns.value)
+
+	if (!files.ok) {
+		return files
+	}
+
+	return ok({
+		projectRoot,
+		files: files.value,
+	})
+}
+
+async function listDirectoryArchiveFiles(
+	projectRoot: string,
+	currentPath: string,
+	excludePatterns: readonly string[],
+): Promise<Result<string[]>> {
+	const absolutePath = join(projectRoot, currentPath)
+
+	try {
+		const entries = await readdir(absolutePath, { withFileTypes: true })
+		const files: string[] = []
+
+		for (const entry of entries) {
+			const archivePath = currentPath.length === 0 ? entry.name : `${currentPath}/${entry.name}`
+
+			if (
+				isSensitiveArchiveFilePath(archivePath) ||
+				isPolicyExcludedArchiveFilePath(archivePath, excludePatterns)
+			) {
+				continue
+			}
+
+			const entryPath = join(projectRoot, archivePath)
+			const entryStat = await lstat(entryPath)
+
+			if (entryStat.isDirectory() && !entryStat.isSymbolicLink()) {
+				const nested = await listDirectoryArchiveFiles(projectRoot, archivePath, excludePatterns)
+
+				if (!nested.ok) {
+					return nested
+				}
+
+				files.push(...nested.value)
+				continue
+			}
+
+			if (entryStat.isFile() || entryStat.isSymbolicLink()) {
+				files.push(archivePath)
+			}
+		}
+
+		return ok(files.sort())
+	} catch (error) {
+		return fileSystemFailure("Could not select archive files from directory.", error, {
+			path: absolutePath,
+		})
+	}
+}
+
+function isNotGitRepositoryError(error: ExecFileError): boolean {
+	return (
+		typeof error.code === "number" &&
+		error.code === 128 &&
+		execOutputToString(error.stderr).includes("not a git repository")
+	)
 }
 
 async function archiveExcludePatternsForProjectRoot(
@@ -2029,12 +2110,39 @@ async function findExistingMarker<Marker extends ProjectRootMarker>(
 	for (const marker of markers) {
 		const stat = await statPath(join(directory, marker))
 
-		if (stat !== undefined) {
+		if (stat !== undefined && (await isValidProjectRootMarker(directory, marker))) {
 			return marker
 		}
 	}
 
 	return undefined
+}
+
+async function isValidProjectRootMarker(
+	directory: string,
+	marker: ProjectRootMarker,
+): Promise<boolean> {
+	if (marker !== ".git") {
+		return true
+	}
+
+	try {
+		const { stdout } = await execFileAsync(
+			"git",
+			["-C", directory, "rev-parse", "--show-toplevel"],
+			{
+				encoding: "utf8",
+			},
+		)
+
+		return resolve(stdout.trim()) === resolve(directory)
+	} catch (error) {
+		if (isExecFileError(error)) {
+			return false
+		}
+
+		throw error
+	}
 }
 
 async function statPath(path: string) {

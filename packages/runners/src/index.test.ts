@@ -73,7 +73,7 @@ describe("findProjectRoot", () => {
 		const packageRoot = join(root, "packages", "app")
 		const sourceFile = join(packageRoot, "src", "index.ts")
 
-		await mkdir(join(root, ".git"), { recursive: true })
+		await initGitProject(root)
 		await mkdir(join(packageRoot, "src"), { recursive: true })
 		await writeFile(join(packageRoot, "package.json"), "{}")
 		await writeFile(sourceFile, "export const value = 1\n")
@@ -180,7 +180,7 @@ describe("loadProjectPolicy", () => {
 		const root = await tempProject()
 		const policyPath = join(root, projectPolicyFilePath)
 
-		await mkdir(join(root, ".git"), { recursive: true })
+		await initGitProject(root)
 
 		const result = await loadProjectPolicy({ startPath: root })
 
@@ -496,19 +496,53 @@ describe("selectArchiveFiles", () => {
 		}
 	})
 
-	it("returns a command failure when git cannot list files", async () => {
+	it("falls back to directory selection for projects that are not git repositories", async () => {
 		const root = await tempProject()
+		await mkdir(join(root, ".sando", "runs", "run_fixture"), { recursive: true })
+		await mkdir(join(root, "dist"), { recursive: true })
+		await mkdir(join(root, "ignored-dir"), { recursive: true })
+		await mkdir(join(root, "node_modules", ".cache"), { recursive: true })
+		await mkdir(join(root, "src"), { recursive: true })
+		await writeFile(join(root, "package.json"), JSON.stringify({ name: "non-git-fixture" }))
+		await writeFile(join(root, "src", "index.ts"), "export const value = 1\n")
+		await writeFile(join(root, ".env"), "TOKEN=secret\n")
+		await writeFile(join(root, ".sando", "session.json"), JSON.stringify({ token: "secret" }))
+		await writeFile(join(root, ".sando", "runs", "run_fixture", "result.json"), "{}\n")
+		await writeFile(join(root, "dist", "output.js"), "ignored output\n")
+		await writeFile(join(root, "ignored-dir", "generated.txt"), "ignored output\n")
+		await writeFile(join(root, "node_modules", ".cache", "entry"), "ignored dependency\n")
+		await writePolicy(root, {
+			...defaultSandoPolicy,
+			exclude: [...defaultSandoPolicy.exclude, "ignored-dir"],
+		})
+
 		const result = await selectArchiveFiles({ projectRoot: root })
+
+		expect(result.ok).toBe(true)
+		if (result.ok) {
+			expect(result.value).toEqual({
+				projectRoot: root,
+				files: [".sando/policy.json", "package.json", "src/index.ts"],
+			})
+		}
+	})
+
+	it("returns a command failure when git cannot run", async () => {
+		const root = await tempProject()
+		const result = await selectArchiveFiles({
+			gitExecutable: "sando-git-that-does-not-exist",
+			projectRoot: root,
+		})
 
 		expect(result.ok).toBe(false)
 		if (!result.ok) {
 			expect(result.error.code).toBe("COMMAND_FAILED")
 			expect(result.error.details).toEqual({
-				command: "git ls-files -z -c -o --exclude-standard",
+				command: "sando-git-that-does-not-exist ls-files -z -c -o --exclude-standard",
 				cwd: root,
-				exitCode: 128,
-				errorCode: null,
-				stderr: expect.stringContaining("not a git repository"),
+				exitCode: null,
+				errorCode: "ENOENT",
+				stderr: "",
 			})
 		}
 	})
@@ -633,9 +667,10 @@ describe("integration fixture repo", () => {
 
 	it("keeps the node-ts fixture test script runnable", async () => {
 		const root = await tempFixtureProject()
-		const { stdout } = await execFileAsync("pnpm", ["test"], { cwd: root })
 
-		expect(stdout).toContain("fixture exposes a TypeScript entrypoint")
+		await expect(execFileAsync("pnpm", ["test"], { cwd: root })).resolves.toMatchObject({
+			stderr: "",
+		})
 	})
 })
 
