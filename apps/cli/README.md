@@ -61,6 +61,18 @@ The command also runs:
 codex mcp add sando -- sando mcp --project-root <project-root>
 ```
 
+For throwaway validation, set isolated Codex paths before init:
+
+```bash
+export HOME=/tmp/sando-demo-home
+export CODEX_HOME=/tmp/sando-demo-codex
+mkdir -p "$HOME" "$CODEX_HOME"
+sando init --codex --project-root /tmp/sando-demo-project
+```
+
+Those variables are passed through to `codex mcp add`, so the demo writes to the
+temporary Codex config instead of your real one.
+
 ## MCP
 
 `sando mcp` starts the stdio MCP server:

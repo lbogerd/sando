@@ -97,7 +97,12 @@ describe("sando CLI", () => {
 
 	it("initializes project files and configures Codex MCP", async () => {
 		const root = mkdtempSync(join(tmpdir(), "sando-cli-init-"))
-		const calls: Array<{ args: readonly string[]; command: string; cwd: string }> = []
+		const calls: Array<{
+			args: readonly string[]
+			command: string
+			cwd: string
+			env?: NodeJS.ProcessEnv
+		}> = []
 
 		try {
 			writeFileSync(join(root, "package.json"), JSON.stringify({ name: "fixture-app" }))
@@ -105,6 +110,8 @@ describe("sando CLI", () => {
 			const result = await initializeSandoProject({
 				codex: true,
 				env: {
+					CODEX_HOME: "/tmp/sando-demo-codex",
+					HOME: "/tmp/sando-demo-home",
 					SANDO_API_URL: "https://api.example.test",
 					WSL_DISTRO_NAME: "Ubuntu",
 					HOSTNAME: "host-a",
@@ -114,7 +121,12 @@ describe("sando CLI", () => {
 				now: new Date("2026-06-15T12:00:00.000Z"),
 				projectRoot: root,
 				runCommand: (command, args, options) => {
-					calls.push({ command, args, cwd: options.cwd })
+					calls.push({
+						command,
+						args,
+						cwd: options.cwd,
+						...(options.env === undefined ? {} : { env: options.env }),
+					})
 					return {
 						status: 0,
 						stdout: "",
@@ -147,13 +159,19 @@ describe("sando CLI", () => {
 					url: "https://api.example.test/v1/login/login_123",
 				},
 			})
-			expect(calls).toEqual([
-				{
-					command: "codex",
-					args: ["mcp", "add", "sando", "--", "sando", "mcp", "--project-root", root],
-					cwd: root,
+			expect(calls).toHaveLength(1)
+			expect(calls[0]).toMatchObject({
+				command: "codex",
+				args: ["mcp", "add", "sando", "--", "sando", "mcp", "--project-root", root],
+				cwd: root,
+				env: {
+					CODEX_HOME: "/tmp/sando-demo-codex",
+					HOME: "/tmp/sando-demo-home",
+					HOSTNAME: "host-a",
+					SANDO_API_URL: "https://api.example.test",
+					WSL_DISTRO_NAME: "Ubuntu",
 				},
-			])
+			})
 			expect(JSON.parse(readFileSync(join(root, defaultProjectFile), "utf8"))).toMatchObject({
 				version: 1,
 				name: "fixture-app",

@@ -94,6 +94,21 @@ The current `sando init --codex` implementation creates:
 The CLI opens the hosted login URL when possible and prints the URL as a
 fallback before polling for the Better Auth bearer session.
 
+For throwaway validation, isolate Codex config from your real account and MCP
+registry:
+
+```bash
+export HOME=/tmp/sando-demo-home
+export CODEX_HOME=/tmp/sando-demo-codex
+export SANDO_API_URL=http://127.0.0.1:3307
+export TMPDIR=/tmp
+mkdir -p "$HOME" "$CODEX_HOME"
+sando init --codex --project-root /tmp/sando-demo-project
+```
+
+`sando init --codex` passes the active environment through to `codex mcp add`,
+so `HOME` and `CODEX_HOME` are preserved when the MCP entry is written.
+
 ## Local Hosted API
 
 Use the root dev script to start the hosted API with a local Postgres database:

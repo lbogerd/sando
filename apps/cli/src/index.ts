@@ -45,7 +45,7 @@ export type SyncCommandResult = {
 export type SyncCommandRunner = (
 	command: string,
 	args: readonly string[],
-	options: { readonly cwd: string },
+	options: { readonly cwd: string; readonly env?: NodeJS.ProcessEnv },
 ) => SyncCommandResult
 
 export type InitializeSandoProjectOptions = {
@@ -259,6 +259,7 @@ export async function initializeSandoProject(
 	const codex =
 		options.codex === true
 			? configureCodexMcp({
+					env: commandEnvironment(env),
 					projectRoot,
 					...optionalString("codexCommand", options.codexCommand ?? env.SANDO_CODEX_BIN),
 					...optionalStringArray(
@@ -675,6 +676,7 @@ function sandoAgentsSection(): string {
 
 function configureCodexMcp(input: {
 	readonly codexCommand?: string
+	readonly env?: NodeJS.ProcessEnv
 	readonly mcpCommand?: readonly string[]
 	readonly projectRoot: string
 	readonly runCommand?: SyncCommandRunner
@@ -687,7 +689,10 @@ function configureCodexMcp(input: {
 	]
 	const args = ["mcp", "add", codexMcpServerName, "--", ...mcpCommand]
 	const runCommand = input.runCommand ?? runSyncCommand
-	const result = runCommand(command, args, { cwd: input.projectRoot })
+	const result = runCommand(command, args, {
+		cwd: input.projectRoot,
+		...(input.env === undefined ? {} : { env: input.env }),
+	})
 
 	if (result.status === 0) {
 		return {
@@ -706,6 +711,13 @@ function configureCodexMcp(input: {
 		...(errorMessage === undefined ? {} : { error: errorMessage }),
 		status: unavailable ? "unavailable" : "failed",
 		stderr: result.stderr,
+	}
+}
+
+function commandEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+	return {
+		...process.env,
+		...env,
 	}
 }
 
@@ -736,11 +748,12 @@ function optionalStringArray<Key extends string>(
 function runSyncCommand(
 	command: string,
 	args: readonly string[],
-	options: { readonly cwd: string },
+	options: { readonly cwd: string; readonly env?: NodeJS.ProcessEnv },
 ): SyncCommandResult {
 	const result = spawnSync(command, [...args], {
 		cwd: options.cwd,
 		encoding: "utf8",
+		...(options.env === undefined ? {} : { env: options.env }),
 	})
 
 	return {
